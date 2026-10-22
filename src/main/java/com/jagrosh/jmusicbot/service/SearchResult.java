@@ -67,7 +67,16 @@ public record SearchResult(AudioTrack track, String title, String artist, String
     {
         StringBuilder sb = new StringBuilder();
         sb.append("`[").append(TimeUtil.formatTime(duration())).append("]` ");
-        sb.append("[**").append(FormatUtil.filter(title == null ? "" : title)).append("**](").append(url()).append(")");
+        if (isHttpUrl(url()))
+        {
+            sb.append("[**").append(FormatUtil.filter(title == null ? "" : title)).append("**](").append(url()).append(")");
+        }
+        else
+        {
+            // A track from the local library has a file path instead of a url, and Discord
+            // would render that as an enormous unreadable link.
+            sb.append("**").append(FormatUtil.filter(title == null ? "" : title)).append("**");
+        }
         if (artist != null && !artist.isBlank())
         {
             sb.append(" \u2014 ").append(FormatUtil.filter(artist));
@@ -87,10 +96,21 @@ public record SearchResult(AudioTrack track, String title, String artist, String
      */
     public EmbedBuilder buildEmbed(java.awt.Color color)
     {
-        EmbedBuilder embed = new EmbedBuilder()
-                .setTitle(FormatUtil.filter(title == null ? "Unknown title" : title), url())
-                .setColor(color)
-                .addField("Artist", FormatUtil.filter(artist == null || artist.isBlank() ? "Unknown" : artist), true)
+        String title = FormatUtil.filter(this.title == null ? "Unknown title" : this.title);
+        EmbedBuilder embed = new EmbedBuilder().setColor(color);
+
+        // Discord only accepts http(s) urls for the title link and for the thumbnail. A track
+        // from the local library has a file path, which would make the embed fail to build.
+        if (isHttpUrl(url()))
+        {
+            embed.setTitle(title, url());
+        }
+        else
+        {
+            embed.setTitle(title);
+        }
+
+        embed.addField("Artist", FormatUtil.filter(artist == null || artist.isBlank() ? "Unknown" : artist), true)
                 .addField("Duration", TimeUtil.formatTime(duration()), true);
 
         if (local)
@@ -98,11 +118,25 @@ public record SearchResult(AudioTrack track, String title, String artist, String
             embed.addField("Source", "Local library \uD83C\uDFB7", true);
         }
 
-        if (artwork != null && !artwork.isBlank())
+        if (isHttpUrl(artwork))
         {
             embed.setThumbnail(artwork);
         }
 
         return embed;
+    }
+
+    /**
+     * @param value the value to test
+     * @return true if the value is an http(s) url that Discord accepts
+     */
+    public static boolean isHttpUrl(String value)
+    {
+        if (value == null || value.isBlank())
+        {
+            return false;
+        }
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        return lower.startsWith("http://") || lower.startsWith("https://");
     }
 }
