@@ -150,11 +150,10 @@ public class SearchService
             }
 
             LOG.debug("Local library match for \"{}\": {}", query, libraryTrack.describe());
-            return List.of(new SearchResult(track,
+            return List.of(SearchResult.of(track,
                     libraryTrack.title().isEmpty() ? track.getInfo().title : libraryTrack.title(),
                     libraryTrack.artist(),
-                    libraryTrack.artwork(),
-                    true));
+                    libraryTrack.artwork()));
         }
         catch (RuntimeException e)
         {
@@ -199,8 +198,8 @@ public class SearchService
         List<SearchResult> results = new ArrayList<>(localResults);
         for (AudioTrack track : tracks)
         {
-            results.add(new SearchResult(track, track.getInfo().title, track.getInfo().author,
-                    artworkOf(track), false));
+            results.add(SearchResult.of(track, track.getInfo().title, track.getInfo().author,
+                    artworkOf(track)));
         }
         return results;
     }

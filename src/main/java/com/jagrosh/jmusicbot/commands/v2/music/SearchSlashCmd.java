@@ -109,7 +109,7 @@ public class SearchSlashCmd extends MusicSlashCommand
                                         title,
                                         result.url(),
                                         artist + " \u2022 " + TimeUtil.formatTime(result.duration())
-                                                + (result.local() ? " \u2022 local library" : "")
+                                                + " \u2022 " + result.sourceLabel()
                                 );
                             }
 

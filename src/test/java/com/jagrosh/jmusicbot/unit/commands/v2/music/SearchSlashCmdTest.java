@@ -291,7 +291,7 @@ public class SearchSlashCmdTest
         for (AudioTrack track : playlist.getTracks())
         {
             AudioTrackInfo info = track.getInfo();
-            results.add(new SearchResult(track, info.title, info.author, info.artworkUrl, false));
+            results.add(SearchResult.of(track, info.title, info.author, info.artworkUrl));
         }
         return results;
     }

@@ -26,17 +26,58 @@ import com.jagrosh.jmusicbot.utils.TimeUtil;
  * One entry of a search result, with the information that is shown for it.
  *
  * <p>Both the online results and the local library carry a title, an artist, a duration, a
- * thumbnail and a playable track, so they can be shown the same way.
+ * thumbnail, a source and a playable track, so they can be shown the same way.
  *
  * @param track the playable track
  * @param title the title to show
  * @param artist the uploader or artist to show
  * @param artwork the thumbnail url, may be empty
- * @param local true when the track comes from the local music library
+ * @param source the raw source name of the track, for example {@code youtube} or {@code local}
  * @author Arif Banai (arif-banai)
  */
-public record SearchResult(AudioTrack track, String title, String artist, String artwork, boolean local)
+public record SearchResult(AudioTrack track, String title, String artist, String artwork, String source)
 {
+    /**
+     * The name of the local library source.
+     */
+    public static final String LOCAL_SOURCE = "local";
+
+    /**
+     * Creates a result, taking the source from the track itself.
+     *
+     * @param track the playable track
+     * @param title the title to show
+     * @param artist the uploader or artist to show
+     * @param artwork the thumbnail url, may be empty
+     * @return the result
+     */
+    public static SearchResult of(AudioTrack track, String title, String artist, String artwork)
+    {
+        return new SearchResult(track, title, artist, artwork, sourceNameOf(track));
+    }
+
+    /**
+     * The source name of a track.
+     *
+     * @param track the track
+     * @return the source name, or an empty string when it is not known
+     */
+    public static String sourceNameOf(AudioTrack track)
+    {
+        if (track == null)
+        {
+            return "";
+        }
+        try
+        {
+            return track.getSourceManager() == null ? "" : track.getSourceManager().getSourceName();
+        }
+        catch (RuntimeException e)
+        {
+            return "";
+        }
+    }
+
     /**
      * The length of the track in milliseconds.
      *
@@ -58,7 +99,42 @@ public record SearchResult(AudioTrack track, String title, String artist, String
     }
 
     /**
-     * The choice line used by the text based menu.
+     * @return true when the track comes from the local music library
+     */
+    public boolean local()
+    {
+        return LOCAL_SOURCE.equalsIgnoreCase(source);
+    }
+
+    /**
+     * A readable name for the source of the track.
+     *
+     * @return the label to show
+     */
+    public String sourceLabel()
+    {
+        if (source == null || source.isBlank())
+        {
+            return "Unknown";
+        }
+        return switch (source.toLowerCase(java.util.Locale.ROOT))
+        {
+            case LOCAL_SOURCE, "library" -> "Local library";
+            case "youtube" -> "YouTube";
+            case "soundcloud" -> "SoundCloud";
+            case "bandcamp" -> "Bandcamp";
+            case "vimeo" -> "Vimeo";
+            case "twitch" -> "Twitch";
+            case "beam" -> "Beam.pro";
+            case "getyarn" -> "Getyarn";
+            case "nico" -> "NicoNico";
+            case "http" -> "HTTP";
+            default -> source.substring(0, 1).toUpperCase() + source.substring(1);
+        };
+    }
+
+    /**
+     * The choice line used by a text based menu.
      *
      * @param number the position of the result, starting at 1
      * @return the formatted choice
@@ -81,10 +157,7 @@ public record SearchResult(AudioTrack track, String title, String artist, String
         {
             sb.append(" \u2014 ").append(FormatUtil.filter(artist));
         }
-        if (local)
-        {
-            sb.append(" \uD83C\uDFB7");
-        }
+        sb.append(" `[").append(sourceLabel()).append("]`");
         return sb.toString();
     }
 
@@ -111,12 +184,8 @@ public record SearchResult(AudioTrack track, String title, String artist, String
         }
 
         embed.addField("Artist", FormatUtil.filter(artist == null || artist.isBlank() ? "Unknown" : artist), true)
-                .addField("Duration", TimeUtil.formatTime(duration()), true);
-
-        if (local)
-        {
-            embed.addField("Source", "Local library \uD83C\uDFB7", true);
-        }
+                .addField("Duration", TimeUtil.formatTime(duration()), true)
+                .addField("Source", sourceLabel() + (local() ? " \uD83C\uDFB7" : ""), true);
 
         if (isHttpUrl(artwork))
         {

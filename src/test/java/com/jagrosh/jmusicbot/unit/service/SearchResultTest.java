@@ -48,23 +48,24 @@ class SearchResultTest
     class ChoiceFormatting
     {
         @Test
-        @DisplayName("The choice shows the title, the duration and the artist")
-        void choiceShowsTitleDurationAndArtist()
+        @DisplayName("The choice shows the title, the duration, the artist and the source")
+        void choiceShowsTitleDurationArtistAndSource()
         {
             SearchResult result = new SearchResult(track("Example Song", "Example Artist", ""), "Example Song",
-                    "Example Artist", "", false);
+                    "Example Artist", "", "youtube");
 
             String choice = result.formatChoice(1);
             assertTrue(choice.contains("Example Song"), choice);
             assertTrue(choice.contains("Example Artist"), choice);
             assertTrue(choice.contains("02:42"), choice);
+            assertTrue(choice.contains("YouTube"), choice);
         }
 
         @Test
         @DisplayName("A result without an artist does not show a dash")
         void resultWithoutArtistHasNoDash()
         {
-            SearchResult result = new SearchResult(track("Song", "", ""), "Song", "", "", false);
+            SearchResult result = new SearchResult(track("Song", "", ""), "Song", "", "", "youtube");
 
             assertFalse(result.formatChoice(1).contains("\u2014"),
                     "An empty artist should not leave a dangling separator");
@@ -80,7 +81,7 @@ class SearchResultTest
         void embedCarriesTitleArtistAndThumbnail()
         {
             SearchResult result = new SearchResult(track("Example Song", "Example Artist", ""), "Example Song",
-                    "Example Artist", "https://i.ytimg.com/vi/abc/hqdefault.jpg", false);
+                    "Example Artist", "https://i.ytimg.com/vi/abc/hqdefault.jpg", "youtube");
 
             EmbedBuilder builder = result.buildEmbed(null);
             var embed = builder.build();
@@ -96,11 +97,42 @@ class SearchResultTest
         @DisplayName("A local result is marked as coming from the library")
         void localResultIsMarked()
         {
-            SearchResult result = new SearchResult(track("Song", "Artist", ""), "Song", "Artist", "", true);
+            SearchResult result = new SearchResult(track("Song", "Artist", ""), "Song", "Artist", "", "local");
 
             var embed = result.buildEmbed(null).build();
-            assertTrue(embed.getFields().stream().anyMatch(f -> "Source".equals(f.getName())),
-                    embed.getFields().toString());
+            assertTrue(embed.getFields().stream().anyMatch(f -> "Source".equals(f.getName())
+                    && f.getValue().startsWith("Local library")), embed.getFields().toString());
+            assertTrue(result.local());
+        }
+
+        @Test
+        @DisplayName("Every result shows its source")
+        void everyResultShowsItsSource()
+        {
+            assertTrue(new SearchResult(track("S", "A", ""), "S", "A", "", "youtube")
+                    .buildEmbed(null).build().getFields().stream()
+                    .anyMatch(f -> "Source".equals(f.getName()) && "YouTube".equals(f.getValue())));
+
+            assertTrue(new SearchResult(track("S", "A", ""), "S", "A", "", "soundcloud")
+                    .buildEmbed(null).build().getFields().stream()
+                    .anyMatch(f -> "Source".equals(f.getName()) && "SoundCloud".equals(f.getValue())));
+        }
+
+        @Test
+        @DisplayName("The source label has a readable name for every known source")
+        void sourceLabelsAreReadable()
+        {
+            assertEquals("YouTube", label("youtube"));
+            assertEquals("SoundCloud", label("soundcloud"));
+            assertEquals("Bandcamp", label("bandcamp"));
+            assertEquals("Local library", label("local"));
+            assertEquals("NicoNico", label("nico"));
+            assertEquals("Unknown", label(""));
+        }
+
+        private static String label(String source)
+        {
+            return new SearchResult(track("S", "A", ""), "S", "A", "", source).sourceLabel();
         }
     }
 }
