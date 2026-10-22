@@ -21,6 +21,7 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import dev.lavalink.youtube.YoutubeAudioSourceManager;
 import dev.lavalink.youtube.clients.ClientOptions;
 import dev.lavalink.youtube.clients.MWebWithThumbnail;
+import dev.lavalink.youtube.clients.skeleton.Client;
 import dev.lavalink.youtube.track.format.StreamFormat;
 
 import java.util.List;
@@ -56,6 +57,29 @@ public class LegacyFormatClient extends MWebWithThumbnail
      */
     public static final int LEGACY_ITAG = 18;
 
+    /**
+     * How long a player API response is reused, in milliseconds.
+     *
+     * <p>The player API is the slowest part of loading a track (about 1 to 2 seconds), and
+     * youtube-source asks for it twice: once to read the metadata of a video and once more to
+     * read the formats when the track starts playing. Both requests ask for the same video, so
+     * the second one can be served from a cache.
+     *
+     * <p>Five minutes is short enough for the metadata to stay accurate and long enough to
+     * cover the gap between a track being queued and it starting to play.
+     */
+    private static final long CACHE_TTL_MS = PlayerApiCache.DEFAULT_TTL_MS;
+
+    /**
+     * The maximum number of player API responses that are kept.
+     */
+    private static final int CACHE_MAX_ENTRIES = PlayerApiCache.DEFAULT_MAX_ENTRIES;
+
+    /**
+     * The cached player API responses, by video id.
+     */
+    private final PlayerApiCache responseCache = new PlayerApiCache();
+
     public LegacyFormatClient()
     {
         super();
@@ -78,6 +102,60 @@ public class LegacyFormatClient extends MWebWithThumbnail
             return true;
         }
         return super.extractFormat(formatJson, formats, isLive);
+    }
+
+    /**
+     * Returns the player API response for a video, from the cache when it is still fresh.
+     *
+     * <p>Without this, every track costs two player API requests: one for the metadata when
+     * the track is queued, and another one for the formats when it starts playing. With the
+     * cache, the second one is free.
+     *
+     * @param source the source manager
+     * @param httpInterface the http interface to use
+     * @param videoId the id of the video
+     * @param status the last playability status
+     * @param validatePlayabilityStatus whether the playability status is validated
+     * @return the player API response
+     */
+    @Override
+    public JsonBrowser loadTrackInfoFromInnertube(YoutubeAudioSourceManager source,
+                                                  com.sedmelluq.discord.lavaplayer.tools.io.HttpInterface httpInterface,
+                                                  String videoId,
+                                                  Client.PlayabilityStatus status,
+                                                  boolean validatePlayabilityStatus)
+            throws dev.lavalink.youtube.CannotBeLoaded, java.io.IOException
+    {
+        String key = videoId + "|" + status + "|" + validatePlayabilityStatus;
+
+        JsonBrowser cached = responseCache.get(key);
+        if (cached != null)
+        {
+            return cached;
+        }
+
+        JsonBrowser json = super.loadTrackInfoFromInnertube(source, httpInterface, videoId, status,
+                validatePlayabilityStatus);
+
+        responseCache.put(key, json);
+
+        return json;
+    }
+
+    /**
+     * @return the number of player API requests that were served from the cache
+     */
+    public long getCacheHits()
+    {
+        return responseCache.getHits();
+    }
+
+    /**
+     * @return the number of player API requests that had to be made
+     */
+    public long getCacheMisses()
+    {
+        return responseCache.getMisses();
     }
 
     /**

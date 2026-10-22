@@ -1,6 +1,10 @@
 <!-- author: Kaidan Gustave -->
 <configuration>
 
+    <!--
+        The console appender is what the user sees on the terminal (and what the GUI console
+        panel shows). It is deliberately synchronous: log lines should appear in order.
+    -->
     <appender name="Simple" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <!-- Pattern -->
@@ -10,8 +14,37 @@
         </encoder>
     </appender>
 
+    <!--
+        The file appender writes the same log to disk. It is wrapped in an async appender, so
+        that the formatting and the disk write happen on a background thread and never slow
+        down the bot. This matters a lot at the "trace" level, where every Discord websocket
+        frame and every HTTP response body is logged.
+    -->
+    <appender name="File" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/jmusicbot.log</file>
+        <encoder>
+            <pattern>
+                %d{HH:mm:ss} [%level] [%logger{0}]: %msg%n%ex
+            </pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>logs/jmusicbot.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>20MB</maxFileSize>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>200MB</totalSizeCap>
+        </rollingPolicy>
+    </appender>
+
+    <appender name="AsyncFile" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>4096</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <appender-ref ref="File"/>
+    </appender>
+
     <root level="INFO">
         <appender-ref ref="Simple"/>
+        <appender-ref ref="AsyncFile"/>
     </root>
 
 </configuration>
