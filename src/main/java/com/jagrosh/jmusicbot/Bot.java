@@ -29,13 +29,18 @@ import com.jagrosh.jmusicbot.playlist.PlaylistLoader;
 import com.jagrosh.jmusicbot.settings.SettingsManager;
 import com.jagrosh.jmusicbot.service.MusicService;
 import com.jagrosh.jmusicbot.service.SearchService;
+import com.jagrosh.jmusicbot.library.MusicLibrary;
+import com.jagrosh.jmusicbot.library.YtDlpDownloader;
 import com.jagrosh.jmusicbot.utils.InstanceLock;
+import com.jagrosh.jmusicbot.utils.OtherUtil;
 import com.jagrosh.jmusicbot.utils.YoutubeOauth2TokenHandler;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.Guild;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -60,6 +65,9 @@ public class Bot
     private final UserInteraction userInteraction;
     private final Instant startTime;
     private final AudioLoadWrapper audioLoadWrapper;
+    private final MusicLibrary musicLibrary;
+    private final YtDlpDownloader ytdlp;
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(Bot.class);
     
     private boolean shuttingDown = false;
     private JDA jda;
@@ -73,6 +81,8 @@ public class Bot
         this.settings = settings;
         this.userInteraction = userInteraction;
         this.playlists = new PlaylistLoader(config);
+        this.musicLibrary = createMusicLibrary(config);
+        this.ytdlp = createYtDlpDownloader(config);
         this.threadpool = Executors.newSingleThreadScheduledExecutor();
         this.startTime = Instant.now();
         this.youTubeOauth2TokenHandler = new YoutubeOauth2TokenHandler();
@@ -96,6 +106,66 @@ public class Bot
     public BotConfig getConfig()
     {
         return config;
+    }
+
+    /**
+     * @return the local music library
+     */
+    public MusicLibrary getMusicLibrary()
+    {
+        return musicLibrary;
+    }
+
+    /**
+     * @return the yt-dlp downloader used to fetch tracks for the library
+     */
+    public YtDlpDownloader getYtDlp()
+    {
+        return ytdlp;
+    }
+
+    /**
+     * Creates the local music library, if it is enabled.
+     *
+     * @param config the bot configuration
+     * @return the library, or null when it is disabled
+     */
+    private static MusicLibrary createMusicLibrary(BotConfig config)
+    {
+        if (!config.libraryEnabled())
+        {
+            return null;
+        }
+        MusicLibrary library = new MusicLibrary(OtherUtil.getPath(config.getLibraryFolder()));
+        library.ensureReady();
+        LOGGER.info("Local music library: {} ({} tracks)", library.getFolder().toAbsolutePath(), library.listTracks().size());
+        return library;
+    }
+
+    /**
+     * Creates the yt-dlp downloader, if the library is enabled.
+     *
+     * @param config the bot configuration
+     * @return the downloader, or null when it is not usable
+     */
+    private static YtDlpDownloader createYtDlpDownloader(BotConfig config)
+    {
+        if (!config.libraryEnabled())
+        {
+            return null;
+        }
+        List<String> command = new ArrayList<>();
+        command.add(config.getLibraryYtdlpCommand());
+        command.addAll(config.getLibraryYtdlpArgs());
+
+        YtDlpDownloader downloader = new YtDlpDownloader(OtherUtil.getPath(config.getLibraryYtdlpDirectory()),
+                command, config.getLibraryAudioFormat(), 15);
+        if (!downloader.isAvailable())
+        {
+            LOGGER.error("yt-dlp is not usable, downloads are disabled");
+            return null;
+        }
+        return downloader;
     }
     
     public SettingsManager getSettingsManager()

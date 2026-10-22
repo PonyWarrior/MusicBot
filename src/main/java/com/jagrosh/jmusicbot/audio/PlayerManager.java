@@ -56,6 +56,14 @@ public class PlayerManager extends DefaultAudioPlayerManager
                     config.getProxyHost(), config.getProxyPort());
         }
         
+        // Register the local music library first, so that a play request is looked up in the
+        // library before it is searched for online.
+        if (config.libraryEnabled() && config.librarySearchFirst() && bot.getMusicLibrary() != null)
+        {
+            registerSourceManager(new LibraryAudioSourceManager(bot.getMusicLibrary()));
+            LOGGER.info("Local music library registered as the first audio source");
+        }
+
         // Register transformative audio sources
         TransformativeAudioSourceManager.createTransforms(config.getTransforms())
                 .forEach(this::registerSourceManager);

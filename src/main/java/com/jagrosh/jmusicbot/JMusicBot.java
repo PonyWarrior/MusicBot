@@ -26,10 +26,14 @@ import com.jagrosh.jmusicbot.gui.theme.ThemeManager;
 import com.jagrosh.jmusicbot.settings.SettingsManager;
 import com.jagrosh.jmusicbot.utils.ConsoleUtil;
 import com.jagrosh.jmusicbot.utils.InstanceLock;
+import com.jagrosh.jmusicbot.utils.LocalCipherService;
 import com.jagrosh.jmusicbot.utils.OtherUtil;
 import com.jagrosh.jmusicbot.utils.TeeOutputStream;
 
 import java.io.PrintStream;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.exceptions.ErrorResponseException;
@@ -45,6 +49,11 @@ import org.slf4j.LoggerFactory;
 public class JMusicBot 
 {
     public final static Logger LOG = LoggerFactory.getLogger(JMusicBot.class);
+
+    /**
+     * The local signature cipher service, if one was started.
+     */
+    private static LocalCipherService localCipherService = null;
     public final static Permission[] RECOMMENDED_PERMS = {
             Permission.VIEW_CHANNEL,
             Permission.MESSAGE_SEND,
@@ -82,6 +91,49 @@ public class JMusicBot
         startBot();
     }
     
+    /**
+     * Starts the local signature cipher service (yt-cipher) as a child process of the bot.
+     *
+     * <p>The service resolves YouTube's signature cipher server-side, which keeps playback
+     * requests away from a third-party service. It is stopped again through a shutdown hook when
+     * the bot exits.
+     *
+     * @param config the bot configuration
+     */
+    private static void startLocalCipherService(BotConfig config)
+    {
+        if (!config.useLocalCipher())
+        {
+            return;
+        }
+
+        try
+        {
+            Path directory = OtherUtil.getPath(config.getLocalCipherDirectory());
+            List<String> command = new ArrayList<>();
+            command.add(config.getLocalCipherCommand());
+            command.addAll(config.getLocalCipherArgs());
+
+            Path logFile = OtherUtil.getPath("logs/yt-cipher.log");
+            LocalCipherService service = new LocalCipherService(directory, command, config.getLocalCipherEnv(),
+                    config.getLocalCipherPort(), config.getLocalCipherStartupTimeout(), logFile);
+
+            if (service.start())
+            {
+                localCipherService = service;
+            }
+            else
+            {
+                LOG.error("The local cipher service could not be started. Playback will use the "
+                        + "cipher server at {}", config.getYoutubeRemoteCipher());
+            }
+        }
+        catch (Exception e)
+        {
+            LOG.error("Could not start the local cipher service: {}", e.getMessage());
+        }
+    }
+
     private static void startBot()
     {
         // Create user interaction handler for startup
@@ -130,6 +182,10 @@ public class JMusicBot
             return;
         }
         LOG.info("Loaded config from {}", config.getConfigLocation());
+
+        // Start the local signature cipher service, if one is configured. It has to be running
+        // before the first track is loaded, and it is stopped again when the JVM exits.
+        startLocalCipherService(config);
 
         // Set log level from config
         ((ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME)).setLevel(

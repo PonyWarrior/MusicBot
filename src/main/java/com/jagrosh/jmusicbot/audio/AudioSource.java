@@ -21,6 +21,7 @@ import java.nio.file.NoSuchFileException;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 
 import com.sedmelluq.discord.lavaplayer.container.MediaContainerRegistry;
 import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
@@ -134,6 +135,12 @@ public enum AudioSource
         (manager, config) -> AudioSourceManagers.registerLocalSource(manager)
     );
 
+    /**
+     * Fallback signature-cipher server used when YouTube OAuth is enabled but no
+     * explicit cipher server is configured.
+     */
+    private static final String DEFAULT_REMOTE_CIPHER = "https://cipher.kikkia.dev/";
+
     private final String configName;
     private final String description;
     private final int registrationPriority;
@@ -238,6 +245,13 @@ public enum AudioSource
         YoutubeAudioSourceManager yt = new YoutubeAudioSourceManager(options, clients);
         yt.setPlaylistPageCount(config.getMaxYTPlaylistPages());
 
+        logger.info("YouTube source configured: oauth={}, remoteCipher={}, clients={}",
+                useOauth,
+                options.getRemoteCipherUrl() == null || options.getRemoteCipherUrl().isEmpty()
+                        ? "disabled (local extraction)"
+                        : options.getRemoteCipherUrl(),
+                Arrays.stream(clients).map(c -> c.getClass().getSimpleName()).collect(Collectors.toList()));
+
         if (useOauth)
         {
             applyOAuth(yt, logger);
@@ -254,12 +268,28 @@ public enum AudioSource
                 .setAllowSearch(true)
                 .setAllowDirectVideoIds(true)
                 .setAllowDirectPlaylistIds(true);
-        
-        if (config.useYouTubeOauth())
-        {
-            options.setRemoteCipher("https://cipher.kikkia.dev/", null, "jmusicbot");
+
+        // The signature cipher is resolved remotely when a cipher server is configured.
+        //
+        // YouTube rotates its player scripts frequently, and youtube-source's local
+        // extractor (LocalSignatureCipherManager) fails with "must find sig function"
+        // on the current scripts. A remote cipher server resolves the signature
+        // server-side, so playback keeps working without a Google account.
+        //
+        // OAuth still forces the remote cipher on, because the OAuth-capable clients
+        // require it and the local extractor cannot satisfy them.
+        String remoteCipher = config.getYoutubeRemoteCipher();
+        if (remoteCipher == null) {
+            remoteCipher = "";
         }
-        
+        if (remoteCipher.isEmpty() && config.useYouTubeOauth()) {
+            remoteCipher = DEFAULT_REMOTE_CIPHER;
+        }
+
+        if (!remoteCipher.isEmpty()) {
+            options.setRemoteCipher(remoteCipher, null, "jmusicbot");
+        }
+
         return options;
     }
     
@@ -293,15 +323,17 @@ public enum AudioSource
                 new MWebWithThumbnail(metadataOnly),      // metadata loading (non-embedded, non-OAuth)
                 new WebWithThumbnail(metadataOnly),       // metadata loading (non-embedded, non-OAuth)
                 new Tv(),
+                new LegacyFormatClient(),                 // legacy itag 18, not throttled by YouTube
                 new TvHtml5SimplyWithThumbnail()
             };
         }
         // Clients are required even without OAuth to properly handle YouTube URLs
         return new Client[] {
+            new LegacyFormatClient(),
             new AndroidVrWithThumbnail(),
             new MWebWithThumbnail(),
             new WebWithThumbnail(),
-            new TvHtml5SimplyWithThumbnail() 
+            new TvHtml5SimplyWithThumbnail()
         };
     }
     

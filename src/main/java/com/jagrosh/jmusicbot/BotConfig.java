@@ -21,6 +21,10 @@ import static com.jagrosh.jmusicbot.config.model.ConfigOption.GUI_THEME;
 import static com.jagrosh.jmusicbot.config.model.ConfigOption.GUI_FONT_SIZE;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -60,11 +64,16 @@ public class BotConfig {
     private Path path = null;
     private String token, prefix, altprefix, helpWord, playlistsFolder, logLevel,
             successEmoji, warningEmoji, errorEmoji, loadingEmoji, searchingEmoji,
-            evalEngine, guiTheme;
-    private boolean stayInChannel, songInGame, npImages, npMinimalMessage, npShowButtons, showNpProgressBar, updatealerts, useEval, dbots, useYouTubeOauth, guiEnabled;
+            evalEngine, guiTheme, youtubeRemoteCipher, localCipherDirectory, localCipherCommand;
+    private boolean stayInChannel, songInGame, npImages, npMinimalMessage, npShowButtons, showNpProgressBar, updatealerts, useEval, dbots, useYouTubeOauth, guiEnabled, localCipherEnabled;
     private long owner, maxSeconds, aloneTimeUntilStop;
     private long clearChannelAgeDays;
-    private int maxYTPlaylistPages, maxHistorySize, guiFontSize, nasBufferMs, frameBufferMs, proxyPort, clearChannelDeleteLimit;
+    private int maxYTPlaylistPages, maxHistorySize, guiFontSize, nasBufferMs, frameBufferMs, proxyPort, clearChannelDeleteLimit, localCipherPort, localCipherStartupTimeout;
+    private List<String> localCipherArgs = new ArrayList<>();
+    private Map<String, String> localCipherEnv = new HashMap<>();
+    private boolean libraryEnabled, librarySearchFirst, libraryDownloadOnFavorite;
+    private String libraryFolder, libraryYtdlpDirectory, libraryYtdlpCommand, libraryAudioFormat;
+    private List<String> libraryYtdlpArgs = new ArrayList<>();
     private String proxyHost;
     private boolean proxyLavaplayer, proxyJda, proxyGithub;
     private double skipratio;
@@ -269,6 +278,27 @@ public class BotConfig {
         maxYTPlaylistPages = MAX_YT_PLAYLIST_PAGES.getInt(config);
         maxHistorySize = MAX_HISTORY_SIZE.getInt(config);
         useYouTubeOauth = USE_YOUTUBE_OAUTH.getBoolean(config);
+        youtubeRemoteCipher = REMOTE_CIPHER.getString(config);
+        localCipherEnabled = LOCAL_CIPHER_ENABLED.getBoolean(config);
+        localCipherDirectory = LOCAL_CIPHER_DIRECTORY.getString(config);
+        localCipherPort = LOCAL_CIPHER_PORT.getInt(config);
+        localCipherCommand = LOCAL_CIPHER_COMMAND.getString(config);
+        localCipherArgs = LOCAL_CIPHER_ARGS.getStringList(config);
+        localCipherStartupTimeout = LOCAL_CIPHER_STARTUP_TIMEOUT.getInt(config);
+        libraryEnabled = LIBRARY_ENABLED.getBoolean(config);
+        libraryFolder = LIBRARY_FOLDER.getString(config);
+        libraryYtdlpDirectory = LIBRARY_YTDLP_DIRECTORY.getString(config);
+        libraryYtdlpCommand = LIBRARY_YTDLP_COMMAND.getString(config);
+        libraryYtdlpArgs = LIBRARY_YTDLP_ARGS.getStringList(config);
+        libraryAudioFormat = LIBRARY_AUDIO_FORMAT.getString(config);
+        librarySearchFirst = LIBRARY_SEARCH_FIRST.getBoolean(config);
+        libraryDownloadOnFavorite = LIBRARY_DOWNLOAD_ON_FAVORITE.getBoolean(config);
+        Config localCipherEnvConfig = LOCAL_CIPHER_ENV.getConfig(config);
+        localCipherEnv = new HashMap<>();
+        for (Map.Entry<String, com.typesafe.config.ConfigValue> entry : localCipherEnvConfig.entrySet())
+        {
+            localCipherEnv.put(entry.getKey(), String.valueOf(entry.getValue().unwrapped()));
+        }
         aloneTimeUntilStop = ALONE_TIME_UNTIL_STOP.getLong(config);
         playlistsFolder = PLAYLISTS_FOLDER.getString(config);
         aliases = ALIASES.getConfig(config);
@@ -518,6 +548,122 @@ public class BotConfig {
 
     public boolean useYouTubeOauth() {
         return useYouTubeOauth;
+    }
+
+    /**
+     * Base URL of the remote signature-cipher server used to resolve YouTube
+     * stream signatures, or an empty string to use youtube-source's local
+     * extraction instead.
+     *
+     * @return the remote cipher server base URL, or an empty string if disabled
+     */
+    public String getYoutubeRemoteCipher() {
+        return youtubeRemoteCipher == null ? "" : youtubeRemoteCipher.trim();
+    }
+
+    /**
+     * @return true if a local yt-cipher service should be started as a child process
+     */
+    public boolean useLocalCipher() {
+        return localCipherEnabled;
+    }
+
+    /**
+     * @return the directory of the local yt-cipher checkout, relative to the working directory
+     */
+    public String getLocalCipherDirectory() {
+        return localCipherDirectory;
+    }
+
+    /**
+     * @return the port the local yt-cipher service listens on
+     */
+    public int getLocalCipherPort() {
+        return localCipherPort;
+    }
+
+    /**
+     * @return the command used to launch the local yt-cipher service
+     */
+    public String getLocalCipherCommand() {
+        return localCipherCommand;
+    }
+
+    /**
+     * @return the arguments passed to the local yt-cipher command
+     */
+    public List<String> getLocalCipherArgs() {
+        return localCipherArgs;
+    }
+
+    /**
+     * @return the environment variables for the local yt-cipher service
+     */
+    public Map<String, String> getLocalCipherEnv() {
+        return localCipherEnv;
+    }
+
+    /**
+     * @return how long to wait for the local yt-cipher service to start, in seconds
+     */
+    public int getLocalCipherStartupTimeout() {
+        return localCipherStartupTimeout;
+    }
+
+    /**
+     * @return true if the local music library is enabled
+     */
+    public boolean libraryEnabled() {
+        return libraryEnabled;
+    }
+
+    /**
+     * @return the folder holding the downloaded tracks
+     */
+    public String getLibraryFolder() {
+        return libraryFolder;
+    }
+
+    /**
+     * @return the directory of the yt-dlp checkout
+     */
+    public String getLibraryYtdlpDirectory() {
+        return libraryYtdlpDirectory;
+    }
+
+    /**
+     * @return the command used to run yt-dlp
+     */
+    public String getLibraryYtdlpCommand() {
+        return libraryYtdlpCommand;
+    }
+
+    /**
+     * @return the arguments passed to the yt-dlp command
+     */
+    public List<String> getLibraryYtdlpArgs() {
+        return libraryYtdlpArgs;
+    }
+
+    /**
+     * @return the audio format downloads are converted to
+     */
+    public String getLibraryAudioFormat() {
+        return libraryAudioFormat;
+    }
+
+    /**
+     * @return true if the local library is searched before searching online
+     */
+    public boolean librarySearchFirst() {
+        return librarySearchFirst;
+    }
+
+    /**
+     * @return true if favoriting a track downloads it to the local library
+     */
+    public boolean libraryDownloadOnFavorite() {
+        return libraryDownloadOnFavorite;
     }
 
     public String getMaxTime() {

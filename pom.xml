@@ -454,6 +454,21 @@
                                         <include>**</include>
                                     </includes>
                                 </filter>
+                                <!--
+                                    Replace youtube-source's stream implementation with the patched
+                                    copy in this project (src/main/java/dev/lavalink/youtube/track).
+                                    The original relies on the legacy "range=" query parameter,
+                                    which YouTube now answers with HTTP 403.
+                                -->
+                                <filter>
+                                    <artifact>dev.lavalink.youtube:v2</artifact>
+                                    <includes>
+                                        <include>**</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>dev/lavalink/youtube/track/YoutubePersistentHttpStream.class</exclude>
+                                    </excludes>
+                                </filter>
                                 <!-- Keep classes that may be loaded via reflection -->
                                 <filter>
                                     <artifact>ch.qos.logback:*</artifact>
@@ -587,7 +602,7 @@
         <jdave.version>0.1.7</jdave.version>
         <udpqueue.version>0.2.12</udpqueue.version>
         <lavaplayer.version>2.2.7</lavaplayer.version>
-        <youtube-source.version>1.18.1</youtube-source.version>
+        <youtube-source.version>1.18.2</youtube-source.version>
         <logback.version>1.5.25</logback.version>
         <typesafe-config.version>1.4.3</typesafe-config.version>
         <jsoup.version>1.22.1</jsoup.version>

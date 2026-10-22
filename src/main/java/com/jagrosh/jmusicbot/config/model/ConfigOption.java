@@ -46,6 +46,26 @@ public enum ConfigOption {
     LOG_LEVEL("logging.level", ConfigType.STRING, false, "Logging verbosity (off, error, warn, info, debug, trace, all)"),
     EVAL_ENGINE("dangerous.evalEngine", ConfigType.STRING, false, "Eval engine name"),
     PLAYLISTS_FOLDER("paths.playlistsFolder", ConfigType.STRING, false, "Alternative folder for playlists"),
+    REMOTE_CIPHER("playback.youtube.remoteCipher", ConfigType.STRING, false, "Base URL of a remote signature-cipher server (empty = local extraction)"),
+
+    // Local cipher service options
+    LOCAL_CIPHER_ENABLED("playback.youtube.localCipher.enabled", ConfigType.BOOLEAN, false, "Start a local yt-cipher service as a child process of the bot"),
+    LOCAL_CIPHER_DIRECTORY("playback.youtube.localCipher.directory", ConfigType.STRING, false, "Directory of the local yt-cipher checkout"),
+    LOCAL_CIPHER_PORT("playback.youtube.localCipher.port", ConfigType.INT, false, "Port the local yt-cipher service listens on"),
+    LOCAL_CIPHER_COMMAND("playback.youtube.localCipher.command", ConfigType.STRING, false, "Command used to launch the local yt-cipher service"),
+    LOCAL_CIPHER_ARGS("playback.youtube.localCipher.args", ConfigType.STRING_LIST, false, "Arguments passed to the local yt-cipher command"),
+    LOCAL_CIPHER_ENV("playback.youtube.localCipher.env", ConfigType.CONFIG, false, "Environment variables for the local yt-cipher service"),
+    LOCAL_CIPHER_STARTUP_TIMEOUT("playback.youtube.localCipher.startupTimeoutSeconds", ConfigType.INT, false, "Seconds to wait for the local yt-cipher service to start"),
+
+    // Local music library options
+    LIBRARY_ENABLED("library.enabled", ConfigType.BOOLEAN, false, "Enable the local music library"),
+    LIBRARY_FOLDER("library.folder", ConfigType.STRING, false, "Folder holding the downloaded music"),
+    LIBRARY_YTDLP_DIRECTORY("library.ytdlpDirectory", ConfigType.STRING, false, "Directory of the yt-dlp checkout"),
+    LIBRARY_YTDLP_COMMAND("library.ytdlpCommand", ConfigType.STRING, false, "Command used to run yt-dlp"),
+    LIBRARY_YTDLP_ARGS("library.ytdlpArgs", ConfigType.STRING_LIST, false, "Arguments passed to the yt-dlp command"),
+    LIBRARY_AUDIO_FORMAT("library.audioFormat", ConfigType.STRING, false, "Audio format downloads are converted to"),
+    LIBRARY_SEARCH_FIRST("library.searchFirst", ConfigType.BOOLEAN, false, "Search the local library before searching online"),
+    LIBRARY_DOWNLOAD_ON_FAVORITE("library.downloadOnFavorite", ConfigType.BOOLEAN, false, "Download the track when it is favorited"),
     
     // Boolean options
     STAY_IN_CHANNEL("voice.stayInChannel", ConfigType.BOOLEAN, false, "Whether to stay in voice channel after queue ends"),

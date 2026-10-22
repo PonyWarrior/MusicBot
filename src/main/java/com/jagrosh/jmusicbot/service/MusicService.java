@@ -20,6 +20,8 @@ import com.jagrosh.jmusicbot.audio.AudioHandler;
 import com.jagrosh.jmusicbot.audio.QueuedTrack;
 import com.jagrosh.jmusicbot.audio.RequestMetadata;
 import com.jagrosh.jmusicbot.commands.v1.DJCommand;
+import com.jagrosh.jmusicbot.library.MusicLibrary;
+import com.jagrosh.jmusicbot.library.YtDlpDownloader;
 import com.jagrosh.jmusicbot.playlist.PlaylistLoader;
 import com.jagrosh.jmusicbot.playlist.PlaylistLoader.Playlist;
 import com.jagrosh.jmusicbot.queue.AbstractQueue;
@@ -769,12 +771,142 @@ public class MusicService
         output.replySuccess("Added " + FormatUtil.filter(FormatUtil.getTrackTitle(currentTrack)) + " to Favorites");
     }
 
+    /**
+     * Downloads the currently playing track into the local music library.
+     *
+     * <p>The download runs in the background, because it has to fetch the audio and convert it,
+     * which takes far longer than a Discord interaction may last. The track is added to the
+     * favourites playlist once the download finished.
+     *
+     * @param guild the guild the track is playing in
+     * @param member the member that asked for the download
+     * @param output the output adapter to reply on
+     */
+    public void downloadCurrentTrack(Guild guild, Member member, OutputAdapter output)
+    {
+        if (!requireDJPermission(guild, member, output, "download the current track"))
+            return;
+
+        AudioHandler handler = getHandler(guild);
+        if (handler == null)
+        {
+            output.replyError("There is no player in this server!");
+            return;
+        }
+
+        AudioTrack currentTrack = handler.getPlayer().getPlayingTrack();
+        if (currentTrack == null)
+        {
+            output.replyError("There is no track currently playing!");
+            return;
+        }
+
+        String uri = currentTrack.getInfo().uri;
+        if (uri == null || uri.isBlank())
+        {
+            output.replyError("The current track does not have a valid URI to download.");
+            return;
+        }
+
+        // A track that is already played from disk does not have to be downloaded again.
+        if (isLocalTrack(currentTrack, uri))
+        {
+            PlaylistLoader.PlaylistResult<PlaylistLoader.AppendIfAbsentResult> appendResult =
+                    bot.getPlaylistLoader().appendItemIfAbsentResult(FAVORITES_PLAYLIST_NAME, uri);
+            if (!appendResult.isSuccess())
+            {
+                output.replyError(mapPlaylistErrorToMessage(appendResult.getError()));
+                return;
+            }
+            handler.markCurrentTrackFavorited(uri);
+            output.editNowPlaying(handler);
+            output.replySuccess("**" + FormatUtil.filter(FormatUtil.getTrackTitle(currentTrack))
+                    + "** is already in your library.");
+            return;
+        }
+
+        // Only a real url can be handed to yt-dlp.
+        if (!isUriLikeReference(uri))
+        {
+            output.replyError("The current track does not have a downloadable URL.");
+            return;
+        }
+
+        MusicLibrary library = bot.getMusicLibrary();
+        YtDlpDownloader ytdlp = bot.getYtDlp();
+        if (library == null || ytdlp == null)
+        {
+            output.replyError("The local music library is not available.");
+            return;
+        }
+
+        String title = FormatUtil.filter(FormatUtil.getTrackTitle(currentTrack));
+        output.replySuccess("Downloading **" + title + "** to your library, this may take a moment...");
+
+        bot.getThreadpool().submit(() ->
+        {
+            try
+            {
+                Path file = ytdlp.download(uri, library.getFolder());
+                library.ensureReady();
+
+                PlaylistLoader.PlaylistResult<PlaylistLoader.AppendIfAbsentResult> appendResult =
+                        bot.getPlaylistLoader().appendItemIfAbsentResult(FAVORITES_PLAYLIST_NAME, file.toAbsolutePath().toString());
+                if (!appendResult.isSuccess())
+                {
+                    LOG.warn("Downloaded {} but could not add it to the favourites playlist: {}",
+                            file, appendResult.getError().getMessage());
+                }
+                LOG.info("Downloaded {} to the music library", file);
+            }
+            catch (Exception e)
+            {
+                LOG.error("Could not download {}: {}", uri, e.getMessage());
+                try
+                {
+                    output.replyError("Could not download **" + title + "**: " + e.getMessage());
+                }
+                catch (Exception ignored)
+                {
+                    // The channel may be gone.
+                }
+            }
+        });
+    }
+
     private static boolean isSupportedFavoriteEntry(String value)
     {
         String candidate = value == null ? "" : value.trim();
         if (candidate.isEmpty())
             return false;
         return isUriLikeReference(candidate) || isOsNativeAbsolutePath(candidate);
+    }
+
+    /**
+     * Checks whether a track is played from the local file system.
+     *
+     * <p>Such a track has a file path as its uri instead of a url, and there is nothing left to
+     * download for it.
+     *
+     * @param track the track
+     * @param uri the uri of the track
+     * @return true if the track is a local file
+     */
+    static boolean isLocalTrack(AudioTrack track, String uri)
+    {
+        if (isOsNativeAbsolutePath(uri))
+        {
+            return true;
+        }
+        try
+        {
+            return track.getSourceManager() != null
+                    && "local".equalsIgnoreCase(track.getSourceManager().getSourceName());
+        }
+        catch (Exception e)
+        {
+            return false;
+        }
     }
 
     private static boolean isUriLikeReference(String value)
