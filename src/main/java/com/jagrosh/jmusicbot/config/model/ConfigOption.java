@@ -100,6 +100,7 @@ public enum ConfigOption {
     // Performance options
     NAS_BUFFER_MS("performance.nasBufferMs", ConfigType.INT, false, "NAS buffer duration in ms (protects against GC pauses)"),
     FRAME_BUFFER_MS("performance.frameBufferMs", ConfigType.INT, false, "Lavaplayer frame buffer duration in ms"),
+    RESAMPLING_QUALITY("performance.resamplingQuality", ConfigType.STRING, false, "Sample rate conversion quality: low, medium, high"),
     
     // Proxy options
     PROXY_HOST("proxy.host", ConfigType.STRING, false, "Proxy server hostname"),

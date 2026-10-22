@@ -69,6 +69,7 @@ public class BotConfig {
     private long owner, maxSeconds, aloneTimeUntilStop;
     private long clearChannelAgeDays;
     private int maxYTPlaylistPages, maxHistorySize, guiFontSize, nasBufferMs, frameBufferMs, proxyPort, clearChannelDeleteLimit, localCipherPort, localCipherStartupTimeout;
+    private String resamplingQuality;
     private List<String> localCipherArgs = new ArrayList<>();
     private Map<String, String> localCipherEnv = new HashMap<>();
     private boolean libraryEnabled, librarySearchFirst, libraryDownloadOnFavorite;
@@ -320,6 +321,7 @@ public class BotConfig {
         // Performance options
         nasBufferMs = NAS_BUFFER_MS.getInt(config);
         frameBufferMs = FRAME_BUFFER_MS.getInt(config);
+        resamplingQuality = RESAMPLING_QUALITY.getString(config);
         
         // Proxy options
         proxyHost = PROXY_HOST.hasValue(config) ? PROXY_HOST.getString(config) : "";
@@ -721,6 +723,15 @@ public class BotConfig {
     
     public int getFrameBufferMs() {
         return frameBufferMs;
+    }
+
+    /**
+     * The quality used for the sample rate conversion to Discord's 48 kHz.
+     *
+     * @return low, medium or high
+     */
+    public String getResamplingQuality() {
+        return resamplingQuality;
     }
     
     // Proxy getters

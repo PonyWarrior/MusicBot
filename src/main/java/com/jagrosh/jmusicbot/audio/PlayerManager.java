@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.BotConfig;
 import com.jagrosh.jmusicbot.utils.ProxyUtil;
+import com.jagrosh.jmusicbot.utils.ResamplingQuality;
 
 /**
  *
@@ -46,6 +47,10 @@ public class PlayerManager extends DefaultAudioPlayerManager
         
         // Configure frame buffer for GC protection (default 2000ms = 2 seconds of audio buffered)
         setFrameBufferDuration(config.getFrameBufferMs());
+
+        // Configure the sample rate conversion quality. The default of lavaplayer is the
+        // coarsest filter, which is audible on music that is not already at 48 kHz.
+        ResamplingQuality.apply(this, config.getResamplingQuality());
         
         // Configure proxy for Lavaplayer HTTP requests if enabled
         // This should be done BEFORE registering source managers
