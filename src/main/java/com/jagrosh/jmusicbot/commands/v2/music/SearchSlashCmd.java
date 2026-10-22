@@ -19,10 +19,9 @@ import com.jagrosh.jdautilities.command.SlashCommandEvent;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.commands.v2.MusicSlashCommand;
 import com.jagrosh.jmusicbot.service.MusicService;
+import com.jagrosh.jmusicbot.service.SearchResult;
 import com.jagrosh.jmusicbot.service.SearchService;
-import com.jagrosh.jmusicbot.utils.FormatUtil;
 import com.jagrosh.jmusicbot.utils.TimeUtil;
-import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.components.actionrow.ActionRow;
@@ -31,11 +30,17 @@ import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionE
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Slash command to search for tracks and select from results.
+ *
+ * <p>Every result is shown as its own embed, with the thumbnail of that result and the artist
+ * or uploader. The results from the local music library are listed first, because a track that
+ * is already downloaded can be played straight from disk.
  */
 public class SearchSlashCmd extends MusicSlashCommand
 {
@@ -76,9 +81,9 @@ public class SearchSlashCmd extends MusicSlashCommand
                         }
 
                         @Override
-                        public void onSearchResults(AudioPlaylist playlist, String[] formattedChoices)
+                        public void onSearchResults(List<SearchResult> results, String[] formattedChoices)
                         {
-                            if (playlist.getTracks().isEmpty())
+                            if (results.isEmpty())
                             {
                                 hook.editOriginal(event.getClient().getWarning() + " No results found for `" + query + "`.").queue();
                                 return;
@@ -90,38 +95,33 @@ public class SearchSlashCmd extends MusicSlashCommand
                                     .setMinValues(1)
                                     .setMaxValues(1);
 
-                            int limit = Math.min(5, playlist.getTracks().size());
-                            StringBuilder description = new StringBuilder();
-                            for (int i = 0; i < limit; i++)
+                            int limit = Math.min(5, results.size());
+                            for (SearchResult result : results.subList(0, limit))
                             {
-                                AudioTrack track = playlist.getTracks().get(i);
-                                String title = FormatUtil.getTrackTitle(track);
-                                if (title == null) {
-                                    title = "";
-                                }
+                                String title = result.title() == null ? "" : result.title();
                                 if (title.length() > 80)
                                 {
                                     title = title.substring(0, 77) + "...";
                                 }
+                                String artist = result.artist() == null || result.artist().isBlank()
+                                        ? "Unknown artist" : result.artist();
                                 menuBuilder.addOption(
                                         title,
-                                        track.getInfo().uri,
-                                        "Duration: " + TimeUtil.formatTime(track.getDuration())
+                                        result.url(),
+                                        artist + " \u2022 " + TimeUtil.formatTime(result.duration())
+                                                + (result.local() ? " \u2022 local library" : "")
                                 );
-                                description.append("`").append(i + 1).append(".` ")
-                                        .append("[**").append(FormatUtil.filter(title)).append("**](")
-                                        .append(track.getInfo().uri).append(") `[")
-                                        .append(TimeUtil.formatTime(track.getDuration())).append("]`\n");
                             }
 
-                            EmbedBuilder embed = new EmbedBuilder()
-                                    .setTitle("Search Results for: " + query)
-                                    .setDescription(description.toString())
-                                    .setColor(event.getMember().getColor())
-                                    .setFooter("Select a track from the menu below");
+                            // One embed per result, each with the thumbnail of that result.
+                            List<EmbedBuilder> embeds = new ArrayList<>();
+                            for (SearchResult result : results.subList(0, limit))
+                            {
+                                embeds.add(result.buildEmbed(event.getMember().getColor()));
+                            }
 
-                            hook.editOriginalEmbeds(embed.build())
-                                    .setContent("")
+                            hook.editOriginalEmbeds(embeds.stream().map(EmbedBuilder::build).toList())
+                                    .setContent(event.getClient().getSuccess() + " Search results for `" + query + "`")
                                     .setComponents(ActionRow.of(menuBuilder.build()))
                                     .queue(msg ->
                                     {
@@ -137,11 +137,11 @@ public class SearchSlashCmd extends MusicSlashCommand
 
                                                     // Find the selected track
                                                     AudioTrack selectedTrack = null;
-                                                    for (AudioTrack track : playlist.getTracks())
+                                                    for (SearchResult result : results)
                                                     {
-                                                        if (track.getInfo().uri.equals(selectedUri))
+                                                        if (result.url().equals(selectedUri))
                                                         {
-                                                            selectedTrack = track;
+                                                            selectedTrack = result.track();
                                                             break;
                                                         }
                                                     }
@@ -174,9 +174,9 @@ public class SearchSlashCmd extends MusicSlashCommand
                                                 },
                                                 1, TimeUnit.MINUTES,
                                                 () -> hook.editOriginal("Search timed out.")
-                                                        .setEmbeds()
-                                                        .setComponents()
-                                                        .queue()
+                                                .setEmbeds()
+                                                .setComponents()
+                                                .queue()
                                         );
                                     });
                         }

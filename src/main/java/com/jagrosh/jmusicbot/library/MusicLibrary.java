@@ -24,8 +24,13 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,6 +51,13 @@ public class MusicLibrary
     private static final List<String> AUDIO_EXTENSIONS = List.of(".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav", ".aac", ".wma");
 
     private final Path folder;
+
+    /**
+     * The parsed info sidecars, by path.
+     */
+    private final Map<Path, JsonNode> metadataCache = new ConcurrentHashMap<>();
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
      * @param folder the folder holding the downloaded tracks
@@ -226,39 +238,56 @@ public class MusicLibrary
      * @param field the field to read
      * @return the value, or an empty string when there is no sidecar or no such field
      */
+    /**
+     * Reads a field out of the yt-dlp info sidecar of a track.
+     *
+     * <p>The sidecar is parsed as JSON, and the parsed form is cached, so that a track with
+     * several fields only reads and parses its sidecar once.
+     *
+     * @param track the track
+     * @param field the field to read
+     * @return the value, or an empty string when there is no sidecar or no such field
+     */
     private String metadata(Path track, String field)
+    {
+        JsonNode root = metadataOf(track);
+        if (root == null)
+        {
+            return "";
+        }
+        JsonNode node = root.get(field);
+        if (node == null || node.isNull())
+        {
+            return "";
+        }
+        return node.isValueNode() ? node.asText() : "";
+    }
+
+    /**
+     * The parsed info sidecar of a track.
+     *
+     * @param track the track
+     * @return the parsed sidecar, or null when there is none
+     */
+    private JsonNode metadataOf(Path track)
     {
         Path sidecar = infoSidecar(track);
         if (sidecar == null)
         {
-            return "";
+            return null;
         }
-        try
+
+        return metadataCache.computeIfAbsent(sidecar, path ->
         {
-            String json = Files.readString(sidecar, StandardCharsets.UTF_8);
-            String key = "\"" + field + "\"";
-            int index = json.indexOf(key);
-            if (index < 0)
+            try
             {
-                return "";
+                return MAPPER.readTree(Files.readAllBytes(path));
             }
-            int colon = json.indexOf(':', index + key.length());
-            if (colon < 0)
+            catch (IOException e)
             {
-                return "";
+                return null;
             }
-            int start = json.indexOf('"', colon);
-            if (start < 0)
-            {
-                return "";
-            }
-            int end = json.indexOf('"', start + 1);
-            return end < 0 ? "" : json.substring(start + 1, end);
-        }
-        catch (IOException e)
-        {
-            return "";
-        }
+        });
     }
 
     /**
@@ -334,20 +363,64 @@ public class MusicLibrary
                 // Without metadata the file name is the best title available.
                 title = stripExtension(path.getFileName().toString());
             }
-            tracks.add(new LibraryTrack(path, title, metadata(path, "artist"), metadata(path, "album")));
+            String artist = uploaderOf(path);
+            String artwork = artworkOf(path);
+            tracks.add(new LibraryTrack(path, title, artist, metadata(path, "album"), artwork));
         }
         return tracks;
+    }
+
+    /**
+     * The uploader of a downloaded track.
+     *
+     * <p>yt-dlp writes the channel that uploaded the video as {@code uploader}. The
+     * {@code artist} field is often empty for user generated content, so it is only used as a
+     * fallback.
+     *
+     * @param track the track
+     * @return the uploader, or an empty string
+     */
+    private String uploaderOf(Path track)
+    {
+        String uploader = metadata(track, "uploader");
+        if (!uploader.isEmpty())
+        {
+            return uploader;
+        }
+        uploader = metadata(track, "artist");
+        if (!uploader.isEmpty())
+        {
+            return uploader;
+        }
+        return metadata(track, "channel");
+    }
+
+    /**
+     * The artwork of a downloaded track, taken from the thumbnail url that yt-dlp recorded.
+     *
+     * @param track the track
+     * @return the artwork url, or an empty string
+     */
+    private String artworkOf(Path track)
+    {
+        String thumbnail = metadata(track, "thumbnail");
+        if (!thumbnail.isEmpty())
+        {
+            return thumbnail;
+        }
+        return metadata(track, "thumbnails");
     }
 
     /**
      * A track in the local library.
      *
      * @param path the file
-     * @param title the title from the metadata, or the file name
-     * @param artist the artist from the metadata
+     * @param title the title from the metadata
+     * @param artist the uploader or artist from the metadata
      * @param album the album from the metadata
+     * @param artwork the artwork url from the metadata
      */
-    public record LibraryTrack(Path path, String title, String artist, String album)
+    public record LibraryTrack(Path path, String title, String artist, String album, String artwork)
     {
         /**
          * @return a human readable description of the track

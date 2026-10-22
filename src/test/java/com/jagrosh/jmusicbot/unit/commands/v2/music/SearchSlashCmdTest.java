@@ -16,6 +16,7 @@
 package com.jagrosh.jmusicbot.unit.commands.v2.music;
 
 import com.jagrosh.jmusicbot.commands.v2.music.SearchSlashCmd;
+import com.jagrosh.jmusicbot.service.SearchResult;
 import com.jagrosh.jmusicbot.service.SearchService;
 import com.jagrosh.jmusicbot.testutil.commands.SlashCommandTestFixture;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
@@ -110,7 +111,7 @@ public class SearchSlashCmdTest
         String query = "test song";
         when(fixture.getEvent().getOption("query")).thenReturn(queryOption);
         when(queryOption.getAsString()).thenReturn(query);
-        when(fixture.getHook().editOriginalEmbeds(any(MessageEmbed.class))).thenReturn(fixture.getEditAction());
+        when(fixture.getHook().editOriginalEmbeds(any(java.util.Collection.class))).thenReturn(fixture.getEditAction());
         when(fixture.getEditAction().setContent(anyString())).thenReturn(fixture.getEditAction());
         when(fixture.getEditAction().setComponents(any(net.dv8tion.jda.api.components.MessageTopLevelComponent.class)))
                 .thenReturn(fixture.getEditAction());
@@ -141,10 +142,10 @@ public class SearchSlashCmdTest
         when(track2.getDuration()).thenReturn(240000L);
         when(playlist.getTracks()).thenReturn(List.of(track1, track2));
 
-        callbackCaptor.getValue().onSearchResults(playlist, new String[]{});
+        callbackCaptor.getValue().onSearchResults(toResults(playlist), new String[]{});
 
-        verify(fixture.getHook()).editOriginalEmbeds(any(MessageEmbed.class));
-        verify(fixture.getEditAction()).setContent("");
+        verify(fixture.getHook()).editOriginalEmbeds(any(java.util.Collection.class));
+        verify(fixture.getEditAction()).setContent(anyString());
         verify(fixture.getEditAction()).setComponents(any(net.dv8tion.jda.api.components.MessageTopLevelComponent.class));
     }
 
@@ -168,7 +169,7 @@ public class SearchSlashCmdTest
         AudioPlaylist playlist = mock(AudioPlaylist.class);
         when(playlist.getTracks()).thenReturn(Collections.emptyList());
 
-        callbackCaptor.getValue().onSearchResults(playlist, new String[]{});
+        callbackCaptor.getValue().onSearchResults(toResults(playlist), new String[]{});
 
         verify(fixture.getHook()).editOriginal("⚠️ No results found for `" + query + "`.");
     }
@@ -248,7 +249,7 @@ public class SearchSlashCmdTest
         String query = "test song";
         when(fixture.getEvent().getOption("query")).thenReturn(queryOption);
         when(queryOption.getAsString()).thenReturn(query);
-        when(fixture.getHook().editOriginalEmbeds(any(MessageEmbed.class))).thenReturn(fixture.getEditAction());
+        when(fixture.getHook().editOriginalEmbeds(any(java.util.Collection.class))).thenReturn(fixture.getEditAction());
         when(fixture.getEditAction().setContent(anyString())).thenReturn(fixture.getEditAction());
         when(fixture.getEditAction().setComponents(any(net.dv8tion.jda.api.components.MessageTopLevelComponent.class)))
                 .thenReturn(fixture.getEditAction());
@@ -274,10 +275,24 @@ public class SearchSlashCmdTest
         when(track1.getDuration()).thenReturn(180000L);
         when(playlist.getTracks()).thenReturn(List.of(track1));
 
-        callbackCaptor.getValue().onSearchResults(playlist, new String[]{});
+        callbackCaptor.getValue().onSearchResults(toResults(playlist), new String[]{});
 
         // Verify waiter was set up
         verify(fixture.getEventWaiter()).waitForEvent(
                 eq(StringSelectInteractionEvent.class), any(), any(), anyLong(), any(), any());
+    }
+
+    /**
+     * Turns a playlist into the result list that the search callback expects.
+     */
+    private static List<SearchResult> toResults(AudioPlaylist playlist)
+    {
+        List<SearchResult> results = new java.util.ArrayList<>();
+        for (AudioTrack track : playlist.getTracks())
+        {
+            AudioTrackInfo info = track.getInfo();
+            results.add(new SearchResult(track, info.title, info.author, info.artworkUrl, false));
+        }
+        return results;
     }
 }

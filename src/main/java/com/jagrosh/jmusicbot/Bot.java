@@ -20,6 +20,7 @@ import com.jagrosh.jdautilities.commons.waiter.EventWaiter;
 import com.jagrosh.jmusicbot.audio.AloneInVoiceHandler;
 import com.jagrosh.jmusicbot.audio.AudioHandler;
 import com.jagrosh.jmusicbot.audio.AudioLoadWrapper;
+import com.jagrosh.jmusicbot.audio.LibraryAudioSourceManager;
 import com.jagrosh.jmusicbot.audio.NowPlayingHandler;
 import com.jagrosh.jmusicbot.audio.PlayerManager;
 import com.jagrosh.jmusicbot.audio.TrackLoadingMonitor;
@@ -66,6 +67,7 @@ public class Bot
     private final Instant startTime;
     private final AudioLoadWrapper audioLoadWrapper;
     private final MusicLibrary musicLibrary;
+    private final LibraryAudioSourceManager librarySource;
     private final YtDlpDownloader ytdlp;
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(Bot.class);
     
@@ -82,6 +84,7 @@ public class Bot
         this.userInteraction = userInteraction;
         this.playlists = new PlaylistLoader(config);
         this.musicLibrary = createMusicLibrary(config);
+        this.librarySource = this.musicLibrary == null ? null : new LibraryAudioSourceManager(this.musicLibrary);
         this.ytdlp = createYtDlpDownloader(config);
         this.threadpool = Executors.newSingleThreadScheduledExecutor();
         this.startTime = Instant.now();
@@ -122,6 +125,14 @@ public class Bot
     public YtDlpDownloader getYtDlp()
     {
         return ytdlp;
+    }
+
+    /**
+     * @return the audio source that reads from the local music library
+     */
+    public LibraryAudioSourceManager getLibrarySource()
+    {
+        return librarySource;
     }
 
     /**
