@@ -139,10 +139,15 @@ public class YtDlpDownloader
         args.add("--print");
         args.add("after_move:filepath");
         args.add("-o");
-        args.add(libraryFolder.resolve("%(title)s.%(ext)s").toString());
+
+        // The output template must be absolute. yt-dlp runs with its own checkout as the
+        // working directory, so a relative template would be resolved against that directory
+        // and the tracks would land inside the yt-dlp checkout instead of the library.
+        Path outputTemplate = libraryFolder.toAbsolutePath().normalize().resolve("%(title)s.%(ext)s");
+        args.add(outputTemplate.toString());
         args.add(url);
 
-        LOG.info("Downloading {} with yt-dlp into {}", url, libraryFolder.toAbsolutePath());
+        LOG.info("Downloading {} with yt-dlp into {}", url, outputTemplate.getParent());
 
         ProcessBuilder builder = new ProcessBuilder(args);
         builder.directory(workingDirectory.toFile());
@@ -177,8 +182,67 @@ public class YtDlpDownloader
             throw new IOException("yt-dlp did not report a downloaded file: " + lastLines(output));
         }
 
+        downloaded = ensureInsideLibrary(downloaded, libraryFolder);
+
         LOG.info("Downloaded {}", downloaded.toAbsolutePath());
         return downloaded;
+    }
+
+    /**
+     * Makes sure a downloaded file really ended up in the library folder.
+     *
+     * <p>The output template is absolute, so this should always hold. It is checked anyway,
+     * because a file outside the library is invisible to the library search: it would never be
+     * found again and the favourites entry would point at something the library does not know.
+     * If it does happen, the file and its info sidecar are moved into the library.
+     *
+     * @param downloaded the file that was downloaded
+     * @param libraryFolder the library folder
+     * @return the file inside the library folder
+     * @throws IOException if the file could not be moved into the library
+     */
+    private Path ensureInsideLibrary(Path downloaded, Path libraryFolder) throws IOException
+    {
+        Path library = libraryFolder.toAbsolutePath().normalize();
+        Path absolute = downloaded.toAbsolutePath().normalize();
+
+        if (absolute.startsWith(library))
+        {
+            return absolute;
+        }
+
+        LOG.warn("yt-dlp wrote {} outside the music library, moving it to {}", absolute, library);
+
+        Files.createDirectories(library);
+        Path target = library.resolve(absolute.getFileName());
+
+        Files.move(absolute, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+
+        // The sidecar carries the title, the artist and the artwork, so it has to follow the
+        // audio file or the library loses the metadata.
+        Path sourceSidecar = sidecarOf(absolute);
+        if (sourceSidecar != null)
+        {
+            Files.move(sourceSidecar, sidecarOf(target), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+
+        return target;
+    }
+
+    /**
+     * @param file an audio file
+     * @return the info sidecar of the file, or null when there is none
+     */
+    private static Path sidecarOf(Path file)
+    {
+        String name = file.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        if (dot < 0)
+        {
+            return null;
+        }
+        Path sidecar = file.resolveSibling(name.substring(0, dot) + ".info.json");
+        return Files.isRegularFile(sidecar) ? sidecar : null;
     }
 
     /**

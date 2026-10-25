@@ -64,7 +64,10 @@ public class MusicLibrary
      */
     public MusicLibrary(Path folder)
     {
-        this.folder = folder;
+        // The folder is stored as an absolute path. The bot passes this path to yt-dlp, which
+        // runs with its own working directory, so a relative path would be resolved against
+        // that directory instead of the bot's.
+        this.folder = folder.toAbsolutePath().normalize();
     }
 
     /**
