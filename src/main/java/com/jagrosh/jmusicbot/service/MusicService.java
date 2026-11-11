@@ -53,6 +53,8 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.regex.Pattern;
 
@@ -756,9 +758,10 @@ public class MusicService
                 return;
             }
             handler.markCurrentTrackFavorited(null);
+            boolean deleted = deleteDownloadedFavorite(favoriteEntry);
             output.editNowPlaying(handler);
             output.replySuccess("Removed " + FormatUtil.filter(FormatUtil.getTrackTitle(currentTrack))
-                    + " from Favorites");
+                    + " from Favorites" + (deleted ? " and deleted the downloaded file" : ""));
             return;
         }
 
@@ -797,6 +800,88 @@ public class MusicService
             if (items.contains(candidate))
                 return candidate;
         return null;
+    }
+
+    /**
+     * Deletes the library file of a favorites entry, when it is a downloaded file.
+     *
+     * <p>Only a file inside the library folder is deleted, and only when no other playlist
+     * still refers to it. The yt-dlp info sidecar is removed with it.
+     *
+     * @param entry the favorites entry that was removed
+     * @return true when a file was deleted
+     */
+    private boolean deleteDownloadedFavorite(String entry)
+    {
+        MusicLibrary library = bot.getMusicLibrary();
+        if (library == null || entry == null || entry.isBlank())
+            return false;
+
+        Path file;
+        try
+        {
+            file = Path.of(entry);
+        }
+        catch (RuntimeException e)
+        {
+            return false;
+        }
+        if (!file.isAbsolute())
+            return false;
+
+        Path libraryFolder = library.getFolder().toAbsolutePath().normalize();
+        Path absolute = file.toAbsolutePath().normalize();
+        if (!absolute.startsWith(libraryFolder) || absolute.equals(libraryFolder))
+            return false;
+        if (isReferencedByAnotherPlaylist(entry))
+        {
+            LOG.info("Not deleting {} because another playlist still references it", absolute);
+            return false;
+        }
+
+        try
+        {
+            boolean deleted = Files.deleteIfExists(absolute);
+            Path sidecar = infoSidecarOf(absolute);
+            if (sidecar != null)
+                Files.deleteIfExists(sidecar);
+            if (deleted)
+                LOG.info("Deleted {} because it was removed from favorites", absolute);
+            return deleted;
+        }
+        catch (IOException e)
+        {
+            LOG.warn("Could not delete {} after unfavoriting: {}", absolute, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * @param entry a favorites entry
+     * @return true when a playlist other than favorites still contains the entry
+     */
+    private boolean isReferencedByAnotherPlaylist(String entry)
+    {
+        for (String name : bot.getPlaylistLoader().getPlaylistNames())
+        {
+            if (name.equalsIgnoreCase(FAVORITES_PLAYLIST_NAME))
+                continue;
+            PlaylistLoader.PlaylistResult<PlaylistLoader.Playlist> result =
+                    bot.getPlaylistLoader().getPlaylistResult(name);
+            if (result.isSuccess() && result.getValue().getItems().contains(entry))
+                return true;
+        }
+        return false;
+    }
+
+    private static Path infoSidecarOf(Path file)
+    {
+        String name = file.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        if (dot < 0)
+            return null;
+        Path sidecar = file.resolveSibling(name.substring(0, dot) + ".info.json");
+        return Files.isRegularFile(sidecar) ? sidecar : null;
     }
 
     public void addCurrentTrackToFavorites(Guild guild, Member member, OutputAdapter output)
