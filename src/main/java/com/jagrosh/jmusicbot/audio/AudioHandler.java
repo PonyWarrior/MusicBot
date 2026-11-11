@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.audio;
 
+import com.jagrosh.jmusicbot.library.MusicLibrary;
 import com.jagrosh.jmusicbot.playlist.PlaylistLoader.Playlist;
 import com.jagrosh.jmusicbot.queue.AbstractQueue;
 import com.jagrosh.jmusicbot.settings.QueueType;
@@ -224,6 +225,11 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
             trackUri = track.getInfo().uri;
         }
         metricsListener.onTrackEnd(trackTitle, trackUri);
+
+        // A track that was unfavorited while it was playing could not be deleted then.
+        MusicLibrary library = manager.getBot().getMusicLibrary();
+        if (library != null)
+            library.processPendingDeletions();
         
         // Log track end with details for debugging
         if (endReason != AudioTrackEndReason.FINISHED) {

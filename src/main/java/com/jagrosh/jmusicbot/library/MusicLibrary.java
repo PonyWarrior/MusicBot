@@ -88,6 +88,7 @@ public class MusicLibrary
         try
         {
             Files.createDirectories(folder);
+            processPendingDeletions();
             return true;
         }
         catch (IOException e)
@@ -95,6 +96,124 @@ public class MusicLibrary
             LOG.error("Could not create the music library folder {}: {}", folder.toAbsolutePath(), e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * The file holding paths that could not be deleted yet, for example because the track was
+     * still being played. It has no audio extension, so it is not listed as a track.
+     */
+    private static final String PENDING_DELETIONS_FILE = ".pending-deletions.txt";
+
+    private final Object deletionLock = new Object();
+
+    /**
+     * Remembers a file to delete later, when it is no longer in use.
+     *
+     * @param file the file to delete
+     */
+    public void scheduleDeletion(Path file)
+    {
+        if(file == null)
+            return;
+        Path absolute = file.toAbsolutePath().normalize();
+        synchronized(deletionLock)
+        {
+            try
+            {
+                Files.createDirectories(folder);
+                Files.writeString(folder.resolve(PENDING_DELETIONS_FILE),
+                        absolute + System.lineSeparator(), StandardCharsets.UTF_8,
+                        java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
+                LOG.info("Scheduled {} for deletion", absolute);
+            }
+            catch(IOException e)
+            {
+                LOG.warn("Could not schedule {} for deletion: {}", absolute, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Deletes the files that were scheduled earlier. Files that are still in use stay on the
+     * list and are retried later.
+     */
+    public void processPendingDeletions()
+    {
+        Path pending = folder.resolve(PENDING_DELETIONS_FILE);
+        if(!Files.isRegularFile(pending))
+            return;
+
+        synchronized(deletionLock)
+        {
+            List<String> remaining = new ArrayList<>();
+            List<String> lines;
+            try
+            {
+                lines = Files.readAllLines(pending, StandardCharsets.UTF_8);
+            }
+            catch(IOException e)
+            {
+                return;
+            }
+
+            for(String line : lines)
+            {
+                String value = line.trim();
+                if(value.isEmpty())
+                    continue;
+                Path file;
+                try
+                {
+                    file = Path.of(value);
+                }
+                catch(RuntimeException e)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    boolean deleted = Files.deleteIfExists(file);
+                    Path sidecar = sidecarOf(file);
+                    if(sidecar != null)
+                        Files.deleteIfExists(sidecar);
+                    if(!deleted && Files.exists(file))
+                        remaining.add(value);
+                    else
+                        LOG.info("Deleted pending file {}", file);
+                }
+                catch(IOException e)
+                {
+                    remaining.add(value);
+                }
+            }
+
+            try
+            {
+                if(remaining.isEmpty())
+                    Files.deleteIfExists(pending);
+                else
+                    Files.write(pending, remaining, StandardCharsets.UTF_8);
+            }
+            catch(IOException e)
+            {
+                LOG.warn("Could not update the pending deletions file: {}", e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * @param file an audio file
+     * @return the yt-dlp info sidecar of the file, or null when there is none
+     */
+    public static Path sidecarOf(Path file)
+    {
+        String name = file.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        if(dot < 0)
+            return null;
+        Path sidecar = file.resolveSibling(name.substring(0, dot) + ".info.json");
+        return Files.isRegularFile(sidecar) ? sidecar : null;
     }
 
     /**

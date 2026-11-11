@@ -758,10 +758,16 @@ public class MusicService
                 return;
             }
             handler.markCurrentTrackFavorited(null);
-            boolean deleted = deleteDownloadedFavorite(favoriteEntry);
+            FavoriteFileDeletion deletion = deleteDownloadedFavorite(favoriteEntry);
             output.editNowPlaying(handler);
+            String suffix = switch (deletion)
+            {
+                case DELETED -> " and deleted the downloaded file";
+                case DEFERRED -> " and scheduled its downloaded file for deletion";
+                case NONE -> "";
+            };
             output.replySuccess("Removed " + FormatUtil.filter(FormatUtil.getTrackTitle(currentTrack))
-                    + " from Favorites" + (deleted ? " and deleted the downloaded file" : ""));
+                    + " from Favorites" + suffix);
             return;
         }
 
@@ -803,19 +809,30 @@ public class MusicService
     }
 
     /**
+     * The result of deleting the library file of an unfavorited track.
+     */
+    private enum FavoriteFileDeletion
+    {
+        NONE,
+        DELETED,
+        DEFERRED
+    }
+
+    /**
      * Deletes the library file of a favorites entry, when it is a downloaded file.
      *
-     * <p>Only a file inside the library folder is deleted, and only when no other playlist
-     * still refers to it. The yt-dlp info sidecar is removed with it.
+     * <p>Only a file inside the library folder is touched, and only when no other playlist still
+     * refers to it. The yt-dlp info sidecar is removed with it. When the file is in use, for
+     * example because it is the track that is playing, it is scheduled for deletion instead.
      *
      * @param entry the favorites entry that was removed
-     * @return true when a file was deleted
+     * @return what happened to the file
      */
-    private boolean deleteDownloadedFavorite(String entry)
+    private FavoriteFileDeletion deleteDownloadedFavorite(String entry)
     {
         MusicLibrary library = bot.getMusicLibrary();
         if (library == null || entry == null || entry.isBlank())
-            return false;
+            return FavoriteFileDeletion.NONE;
 
         Path file;
         try
@@ -824,36 +841,44 @@ public class MusicService
         }
         catch (RuntimeException e)
         {
-            return false;
+            return FavoriteFileDeletion.NONE;
         }
         if (!file.isAbsolute())
-            return false;
+            return FavoriteFileDeletion.NONE;
 
         Path libraryFolder = library.getFolder().toAbsolutePath().normalize();
         Path absolute = file.toAbsolutePath().normalize();
         if (!absolute.startsWith(libraryFolder) || absolute.equals(libraryFolder))
-            return false;
+            return FavoriteFileDeletion.NONE;
         if (isReferencedByAnotherPlaylist(entry))
         {
             LOG.info("Not deleting {} because another playlist still references it", absolute);
-            return false;
+            return FavoriteFileDeletion.NONE;
         }
 
         try
         {
             boolean deleted = Files.deleteIfExists(absolute);
-            Path sidecar = infoSidecarOf(absolute);
-            if (sidecar != null)
-                Files.deleteIfExists(sidecar);
             if (deleted)
+            {
+                Path sidecar = MusicLibrary.sidecarOf(absolute);
+                if (sidecar != null)
+                    Files.deleteIfExists(sidecar);
                 LOG.info("Deleted {} because it was removed from favorites", absolute);
-            return deleted;
+                return FavoriteFileDeletion.DELETED;
+            }
         }
         catch (IOException e)
         {
-            LOG.warn("Could not delete {} after unfavoriting: {}", absolute, e.getMessage());
-            return false;
+            LOG.info("Could not delete {} yet, it will be retried: {}", absolute, e.getMessage());
         }
+
+        if (Files.exists(absolute))
+        {
+            library.scheduleDeletion(absolute);
+            return FavoriteFileDeletion.DEFERRED;
+        }
+        return FavoriteFileDeletion.NONE;
     }
 
     /**
@@ -872,16 +897,6 @@ public class MusicService
                 return true;
         }
         return false;
-    }
-
-    private static Path infoSidecarOf(Path file)
-    {
-        String name = file.getFileName().toString();
-        int dot = name.lastIndexOf('.');
-        if (dot < 0)
-            return null;
-        Path sidecar = file.resolveSibling(name.substring(0, dot) + ".info.json");
-        return Files.isRegularFile(sidecar) ? sidecar : null;
     }
 
     public void addCurrentTrackToFavorites(Guild guild, Member member, OutputAdapter output)
