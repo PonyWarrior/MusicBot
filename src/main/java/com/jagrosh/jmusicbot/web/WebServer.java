@@ -28,11 +28,15 @@ import com.jagrosh.jmusicbot.settings.Settings;
 import com.jagrosh.jmusicbot.utils.OtherUtil;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import com.typesafe.config.Config;
+import com.typesafe.config.ConfigFactory;
+import com.typesafe.config.ConfigValue;
+import com.typesafe.config.parser.ConfigDocument;
+import com.typesafe.config.parser.ConfigDocumentFactory;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Message;
-import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +49,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -98,6 +103,7 @@ public class WebServer
             server.createContext("/api/logs", this::handleLogs);
             server.createContext("/api/settings", this::handleSettings);
             server.createContext("/api/action", this::handleAction);
+            server.createContext("/api/restart", this::handleRestart);
             server.createContext("/", this::handleStatic);
             server.setExecutor(Executors.newFixedThreadPool(4, runnable ->
             {
@@ -185,26 +191,148 @@ public class WebServer
         Path path = ConfigIO.getConfigPath();
         if ("GET".equalsIgnoreCase(exchange.getRequestMethod()))
         {
-            String text = Files.isRegularFile(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
-            sendJson(exchange, 200, Map.of("path", path.toAbsolutePath().toString(), "text", text));
+            if (!Files.isRegularFile(path))
+            {
+                sendJson(exchange, 200, Map.of("path", path.toAbsolutePath().toString(), "entries", List.of()));
+                return;
+            }
+
+            Config config = ConfigFactory.parseFile(path.toFile()).resolve();
+            List<Map<String, Object>> entries = new ArrayList<>();
+            for (Map.Entry<String, ConfigValue> entry : config.entrySet())
+            {
+                String key = entry.getKey();
+                if (key.equals("meta.configVersion"))
+                    continue;
+
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("key", key);
+                switch (entry.getValue().valueType())
+                {
+                    case BOOLEAN ->
+                    {
+                        item.put("type", "boolean");
+                        item.put("value", config.getBoolean(key));
+                    }
+                    case NUMBER ->
+                    {
+                        item.put("type", "number");
+                        item.put("value", entry.getValue().unwrapped());
+                    }
+                    case LIST ->
+                    {
+                        item.put("type", "list");
+                        item.put("value", config.getStringList(key));
+                    }
+                    default ->
+                    {
+                        item.put("type", "string");
+                        item.put("value", config.getString(key));
+                    }
+                }
+                entries.add(item);
+            }
+            entries.sort(Comparator.comparing(item -> String.valueOf(item.get("key"))));
+            sendJson(exchange, 200, Map.of("path", path.toAbsolutePath().toString(), "entries", entries));
             return;
         }
+
         if ("POST".equalsIgnoreCase(exchange.getRequestMethod()))
         {
-            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-            String text = String.valueOf(MAPPER.readValue(body, Map.class).getOrDefault("text", ""));
             try
             {
-                ConfigIO.writeConfigFile(path, text);
+                Map<?, ?> body = MAPPER.readValue(exchange.getRequestBody().readAllBytes(), Map.class);
+                Map<?, ?> values = (Map<?, ?>) body.get("values");
+                if (values == null)
+                    throw new IllegalArgumentException("missing values");
+
+                ConfigDocument document = ConfigDocumentFactory.parseFile(path.toFile());
+                for (Map.Entry<?, ?> entry : values.entrySet())
+                {
+                    String key = String.valueOf(entry.getKey());
+                    Map<?, ?> item = (Map<?, ?>) entry.getValue();
+                    String type = String.valueOf(item.get("type"));
+                    Object value = item.get("value");
+                    document = document.withValueText(key, renderHocon(type, value));
+                }
+                Files.writeString(path, document.render(), StandardCharsets.UTF_8);
                 sendJson(exchange, 200, Map.of("ok", true, "restartRequired", true));
             }
-            catch (IOException e)
+            catch (Exception e)
             {
-                sendJson(exchange, 500, Map.of("ok", false, "error", e.getMessage()));
+                sendJson(exchange, 400, Map.of("ok", false, "error", e.getMessage()));
             }
             return;
         }
         sendJson(exchange, 405, Map.of("error", "method not allowed"));
+    }
+
+    private void handleRestart(HttpExchange exchange) throws IOException
+    {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod()))
+        {
+            sendJson(exchange, 405, Map.of("error", "method not allowed"));
+            return;
+        }
+        sendJson(exchange, 200, Map.of("ok", true));
+        restartBot();
+    }
+
+    /**
+     * Starts the launcher again after a short delay, then shuts this process down. The delay
+     * lets the instance lock be released before the new process starts.
+     */
+    private void restartBot()
+    {
+        try
+        {
+            String launcher = Files.isRegularFile(OtherUtil.getPath("run-gui.bat")) ? "run-gui.bat" : "run.bat";
+            ProcessBuilder builder = new ProcessBuilder("cmd", "/c",
+                    "ping", "-n", "3", "127.0.0.1", ">", "nul", "&", "start", "", launcher);
+            builder.directory(Path.of(".").toAbsolutePath().normalize().toFile());
+            builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+            builder.redirectError(ProcessBuilder.Redirect.DISCARD);
+            builder.start();
+            LOG.info("Restarting with {}", launcher);
+        }
+        catch (IOException e)
+        {
+            LOG.error("Could not start the launcher for a restart: {}", e.getMessage());
+        }
+        bot.shutdown();
+    }
+
+    private static String renderHocon(String type, Object value)
+    {
+        return switch (type)
+        {
+            case "boolean" -> Boolean.parseBoolean(String.valueOf(value)) ? "true" : "false";
+            case "number" ->
+            {
+                String text = String.valueOf(value).trim();
+                Double.parseDouble(text);
+                yield text;
+            }
+            case "list" ->
+            {
+                List<?> list = value instanceof List<?> l ? l : List.of();
+                StringBuilder builder = new StringBuilder("[ ");
+                for (int i = 0; i < list.size(); i++)
+                {
+                    if (i > 0)
+                        builder.append(", ");
+                    builder.append(quote(String.valueOf(list.get(i))));
+                }
+                yield builder.append(" ]").toString();
+            }
+            default -> quote(String.valueOf(value));
+        };
+    }
+
+    private static String quote(String value)
+    {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "\\r") + "\"";
     }
 
     private void handleAction(HttpExchange exchange) throws IOException
