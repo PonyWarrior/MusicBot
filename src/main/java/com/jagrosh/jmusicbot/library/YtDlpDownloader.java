@@ -60,6 +60,34 @@ public class YtDlpDownloader
     }
 
     /**
+     * The command with its executable resolved against the working directory when it is a
+     * relative path. That lets the packaged yt-dlp.exe be found without an absolute path.
+     *
+     * @return the command with an absolute executable when it was found
+     */
+    private List<String> resolvedCommand()
+    {
+        List<String> args = new ArrayList<>(command);
+        if (args.isEmpty())
+            return args;
+        Path executable;
+        try
+        {
+            executable = Path.of(args.get(0));
+        }
+        catch (RuntimeException e)
+        {
+            return args;
+        }
+        if (executable.isAbsolute())
+            return args;
+        Path candidate = workingDirectory.resolve(executable);
+        if (Files.isRegularFile(candidate))
+            args.set(0, candidate.toAbsolutePath().normalize().toString());
+        return args;
+    }
+
+    /**
      * Checks that yt-dlp can be started.
      *
      * @return true if yt-dlp is usable
@@ -73,7 +101,7 @@ public class YtDlpDownloader
         }
         try
         {
-            List<String> args = new ArrayList<>(command);
+            List<String> args = resolvedCommand();
             args.add("--version");
             Path outputFile = Files.createTempFile("jmusicbot-ytdlp", ".log");
             try
@@ -133,7 +161,7 @@ public class YtDlpDownloader
             throw new IOException("Not a downloadable URL: " + url);
         }
 
-        List<String> args = new ArrayList<>(command);
+        List<String> args = resolvedCommand();
         args.add("--no-playlist");
         args.add("--no-warnings");
         args.add("--ignore-config");
