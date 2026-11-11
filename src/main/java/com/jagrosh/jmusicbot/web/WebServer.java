@@ -104,6 +104,7 @@ public class WebServer
             server.createContext("/api/settings", this::handleSettings);
             server.createContext("/api/action", this::handleAction);
             server.createContext("/api/restart", this::handleRestart);
+            server.createContext("/api/theme", this::handleTheme);
             server.createContext("/", this::handleStatic);
             server.setExecutor(Executors.newFixedThreadPool(4, runnable ->
             {
@@ -276,6 +277,35 @@ public class WebServer
             {
                 sendJson(exchange, 400, Map.of("ok", false, "error", e.getMessage()));
             }
+            return;
+        }
+        sendJson(exchange, 405, Map.of("error", "method not allowed"));
+    }
+
+    private void handleTheme(HttpExchange exchange) throws IOException
+    {
+        Path file = OtherUtil.getPath("gui-theme.txt");
+        if ("GET".equalsIgnoreCase(exchange.getRequestMethod()))
+        {
+            String mode = Files.isRegularFile(file)
+                    ? Files.readString(file, StandardCharsets.UTF_8).trim()
+                    : "light";
+            if (!mode.equals("dark"))
+                mode = "light";
+            sendJson(exchange, 200, Map.of("mode", mode));
+            return;
+        }
+        if ("POST".equalsIgnoreCase(exchange.getRequestMethod()))
+        {
+            Map<?, ?> body = MAPPER.readValue(exchange.getRequestBody().readAllBytes(), Map.class);
+            String mode = String.valueOf(body.get("mode"));
+            if (!mode.equals("dark") && !mode.equals("light"))
+            {
+                sendJson(exchange, 400, Map.of("ok", false, "error", "mode must be light or dark"));
+                return;
+            }
+            Files.writeString(file, mode, StandardCharsets.UTF_8);
+            sendJson(exchange, 200, Map.of("ok", true));
             return;
         }
         sendJson(exchange, 405, Map.of("error", "method not allowed"));
