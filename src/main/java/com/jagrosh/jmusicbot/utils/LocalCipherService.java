@@ -114,6 +114,13 @@ public class LocalCipherService
             ProcessBuilder builder = new ProcessBuilder(command);
             builder.directory(directory.toFile());
             builder.environment().putAll(environment);
+            // Use the module cache that ships next to the checkout, so the service can start
+            // without network access. An explicit DENO_DIR from the config still wins.
+            Path bundledCache = directory.resolve("deno-cache");
+            if (Files.isDirectory(bundledCache))
+            {
+                builder.environment().putIfAbsent("DENO_DIR", bundledCache.toAbsolutePath().toString());
+            }
             builder.redirectErrorStream(true);
 
             if (logFile != null)
@@ -145,8 +152,39 @@ public class LocalCipherService
 
         LOG.error("Local cipher service did not start listening on port {} within {} seconds", port,
                 startupTimeoutSeconds);
+        logCipherOutputTail();
         stop();
         return false;
+    }
+
+    /**
+     * Logs the last lines of the service output, so a failed start shows the reason instead of
+     * only a timeout. The service writes its output to {@link #logFile}.
+     */
+    private void logCipherOutputTail()
+    {
+        if (logFile == null || !Files.isRegularFile(logFile))
+        {
+            return;
+        }
+        try
+        {
+            List<String> lines = Files.readAllLines(logFile);
+            int from = Math.max(0, lines.size() - 10);
+            StringBuilder sb = new StringBuilder();
+            for (int i = from; i < lines.size(); i++)
+            {
+                sb.append(lines.get(i)).append('\n');
+            }
+            if (!sb.isEmpty())
+            {
+                LOG.error("Cipher service output:\n{}", sb.toString().strip());
+            }
+        }
+        catch (IOException e)
+        {
+            LOG.debug("Could not read the cipher service log {}: {}", logFile, e.getMessage());
+        }
     }
 
     /**

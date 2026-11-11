@@ -37,7 +37,8 @@ public class ConfigDiagnostics {
      * defined by the user.
      */
     private static final Set<String> PATHS_WITH_DYNAMIC_NESTED_KEYS = Set.of(
-            "playback.transforms"
+            "playback.transforms",
+            "playback.youtube.localCipher.env"
     );
     
     /**
