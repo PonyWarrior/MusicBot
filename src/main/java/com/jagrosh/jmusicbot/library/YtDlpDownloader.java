@@ -22,6 +22,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -39,6 +41,17 @@ import org.slf4j.LoggerFactory;
 public class YtDlpDownloader
 {
     private static final Logger LOG = LoggerFactory.getLogger(YtDlpDownloader.class);
+
+    /**
+     * The yt-dlp processes that are running, so they can be stopped when the bot exits.
+     */
+    private static final Set<Process> RUNNING = ConcurrentHashMap.newKeySet();
+
+    static
+    {
+        Runtime.getRuntime().addShutdownHook(new Thread(() ->
+                RUNNING.forEach(Process::destroyForcibly), "yt-dlp-shutdown"));
+    }
 
     private final Path workingDirectory;
     private final List<String> command;
@@ -104,6 +117,7 @@ public class YtDlpDownloader
             List<String> args = resolvedCommand();
             args.add("--version");
             Path outputFile = Files.createTempFile("jmusicbot-ytdlp", ".log");
+            Process process = null;
             try
             {
                 ProcessBuilder builder = new ProcessBuilder(args);
@@ -112,7 +126,8 @@ public class YtDlpDownloader
                 // The output goes to a file, not a pipe: reading a pipe blocks until EOF, which
                 // would make the waitFor timeout below unreachable and let yt-dlp hang forever.
                 builder.redirectOutput(outputFile.toFile());
-                Process process = builder.start();
+                process = builder.start();
+                RUNNING.add(process);
                 if (!process.waitFor(2, TimeUnit.MINUTES))
                 {
                     process.destroyForcibly();
@@ -129,6 +144,8 @@ public class YtDlpDownloader
             }
             finally
             {
+                if (process != null)
+                    RUNNING.remove(process);
                 Files.deleteIfExists(outputFile);
             }
         }
@@ -193,12 +210,14 @@ public class YtDlpDownloader
         builder.redirectErrorStream(true);
 
         Path outputFile = Files.createTempFile("jmusicbot-ytdlp", ".log");
+        Process process = null;
         try
         {
             // The output goes to a file, not a pipe: reading a pipe blocks until EOF, which
             // would make the waitFor timeout below unreachable and let yt-dlp hang forever.
             builder.redirectOutput(outputFile.toFile());
-            Process process = builder.start();
+            process = builder.start();
+            RUNNING.add(process);
 
             if (!process.waitFor(timeoutMinutes, TimeUnit.MINUTES))
             {
@@ -225,6 +244,8 @@ public class YtDlpDownloader
         }
         finally
         {
+            if (process != null)
+                RUNNING.remove(process);
             Files.deleteIfExists(outputFile);
         }
     }
