@@ -268,7 +268,7 @@ public class LocalCipherService
             try (var in = netstat.getInputStream())
             {
                 output.addAll(new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).lines()
-                        .filter(line -> line.contains("LISTENING") && line.contains(":" + port))
+                        .filter(line -> line.contains("LISTENING"))
                         .toList());
             }
             netstat.waitFor(10, TimeUnit.SECONDS);
@@ -276,16 +276,19 @@ public class LocalCipherService
             for (String line : output)
             {
                 String[] parts = line.trim().split("\\s+");
-                if (parts.length > 0)
+                // parts[1] is the local address, e.g. 127.0.0.1:8001. Checking the whole column
+                // avoids matching a different port such as 80010.
+                if (parts.length < 2 || !parts[1].endsWith(":" + port))
                 {
-                    try
-                    {
-                        owners.add(Integer.parseInt(parts[parts.length - 1]));
-                    }
-                    catch (NumberFormatException e)
-                    {
-                        // Not a process id.
-                    }
+                    continue;
+                }
+                try
+                {
+                    owners.add(Integer.parseInt(parts[parts.length - 1]));
+                }
+                catch (NumberFormatException e)
+                {
+                    // Not a process id.
                 }
             }
         }

@@ -75,23 +75,34 @@ public class YtDlpDownloader
         {
             List<String> args = new ArrayList<>(command);
             args.add("--version");
-            ProcessBuilder builder = new ProcessBuilder(args);
-            builder.directory(workingDirectory.toFile());
-            builder.redirectErrorStream(true);
-            Process process = builder.start();
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            if (!process.waitFor(2, TimeUnit.MINUTES))
+            Path outputFile = Files.createTempFile("jmusicbot-ytdlp", ".log");
+            try
             {
-                process.destroyForcibly();
-                return false;
+                ProcessBuilder builder = new ProcessBuilder(args);
+                builder.directory(workingDirectory.toFile());
+                builder.redirectErrorStream(true);
+                // The output goes to a file, not a pipe: reading a pipe blocks until EOF, which
+                // would make the waitFor timeout below unreachable and let yt-dlp hang forever.
+                builder.redirectOutput(outputFile.toFile());
+                Process process = builder.start();
+                if (!process.waitFor(2, TimeUnit.MINUTES))
+                {
+                    process.destroyForcibly();
+                    return false;
+                }
+                String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+                if (process.exitValue() != 0)
+                {
+                    LOG.error("yt-dlp could not be started: {}", output.strip());
+                    return false;
+                }
+                LOG.info("yt-dlp is available: {}", output.strip());
+                return true;
             }
-            if (process.exitValue() != 0)
+            finally
             {
-                LOG.error("yt-dlp could not be started: {}", output.strip());
-                return false;
+                Files.deleteIfExists(outputFile);
             }
-            LOG.info("yt-dlp is available: {}", output.strip());
-            return true;
         }
         catch (IOException e)
         {
@@ -153,39 +164,41 @@ public class YtDlpDownloader
         builder.directory(workingDirectory.toFile());
         builder.redirectErrorStream(true);
 
-        Process process = builder.start();
-        String output;
+        Path outputFile = Files.createTempFile("jmusicbot-ytdlp", ".log");
         try
         {
-            output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            // The output goes to a file, not a pipe: reading a pipe blocks until EOF, which
+            // would make the waitFor timeout below unreachable and let yt-dlp hang forever.
+            builder.redirectOutput(outputFile.toFile());
+            Process process = builder.start();
+
+            if (!process.waitFor(timeoutMinutes, TimeUnit.MINUTES))
+            {
+                process.destroyForcibly();
+                throw new IOException("The download timed out after " + timeoutMinutes + " minutes");
+            }
+
+            String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+            if (process.exitValue() != 0)
+            {
+                throw new IOException("yt-dlp failed: " + lastLines(output));
+            }
+
+            Path downloaded = parseDownloadedPath(output);
+            if (downloaded == null)
+            {
+                throw new IOException("yt-dlp did not report a downloaded file: " + lastLines(output));
+            }
+
+            downloaded = ensureInsideLibrary(downloaded, libraryFolder);
+
+            LOG.info("Downloaded {}", downloaded.toAbsolutePath());
+            return downloaded;
         }
-        catch (IOException e)
+        finally
         {
-            process.destroyForcibly();
-            throw e;
+            Files.deleteIfExists(outputFile);
         }
-
-        if (!process.waitFor(timeoutMinutes, TimeUnit.MINUTES))
-        {
-            process.destroyForcibly();
-            throw new IOException("The download timed out after " + timeoutMinutes + " minutes");
-        }
-
-        if (process.exitValue() != 0)
-        {
-            throw new IOException("yt-dlp failed: " + lastLines(output));
-        }
-
-        Path downloaded = parseDownloadedPath(output);
-        if (downloaded == null)
-        {
-            throw new IOException("yt-dlp did not report a downloaded file: " + lastLines(output));
-        }
-
-        downloaded = ensureInsideLibrary(downloaded, libraryFolder);
-
-        LOG.info("Downloaded {}", downloaded.toAbsolutePath());
-        return downloaded;
     }
 
     /**

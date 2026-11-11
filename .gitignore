@@ -25,3 +25,6 @@ Thumbs.db
 
 # Other
 *.lock
+
+# Runtime logs (may contain the bot token at trace/all level)
+/logs/
