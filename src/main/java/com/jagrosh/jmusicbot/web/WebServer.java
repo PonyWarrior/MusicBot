@@ -294,7 +294,8 @@ public class WebServer
                 return;
             }
 
-            String command = "ping -n 3 127.0.0.1 >nul & start \"\" /min \"" + launcher + "\"";
+            String command = "ping -n 3 127.0.0.1 >nul & powershell -NoProfile -WindowStyle Hidden "
+                    + "-Command \"Start-Process -FilePath '" + launcher + "' -WindowStyle Hidden\"";
             ProcessBuilder builder = new ProcessBuilder("cmd", "/c", command);
             builder.directory(launcher.getParent().toFile());
             builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
