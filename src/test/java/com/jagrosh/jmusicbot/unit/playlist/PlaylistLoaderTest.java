@@ -314,4 +314,32 @@ class PlaylistLoaderTest
         List<String> lines = Files.readAllLines(tempDir.resolve("favorites.txt"));
         assertEquals(1, lines.stream().filter(l -> l.trim().equals("https://example.com/race")).count());
     }
+
+    @Test
+    @DisplayName("removeItemIfPresentResult removes an existing item and keeps the rest")
+    void removeItemIfPresentResult_removesExistingItem() throws IOException
+    {
+        Path favorites = tempDir.resolve("favorites.txt");
+        Files.writeString(favorites, "a\nb\nc\n");
+
+        PlaylistLoader.PlaylistResult<Boolean> result = loader.removeItemIfPresentResult("favorites", "b");
+
+        assertTrue(result.isSuccess());
+        assertTrue(result.getValue());
+        assertEquals(List.of("a", "c"), Files.readAllLines(favorites));
+    }
+
+    @Test
+    @DisplayName("removeItemIfPresentResult leaves the playlist alone when the item is missing")
+    void removeItemIfPresentResult_leavesMissingItemAlone() throws IOException
+    {
+        Path favorites = tempDir.resolve("favorites.txt");
+        Files.writeString(favorites, "a\n");
+
+        PlaylistLoader.PlaylistResult<Boolean> result = loader.removeItemIfPresentResult("favorites", "z");
+
+        assertTrue(result.isSuccess());
+        assertFalse(result.getValue());
+        assertEquals(List.of("a"), Files.readAllLines(favorites));
+    }
 }

@@ -149,6 +149,30 @@ public class MusicLibrary
      * @param query the search query
      * @return the best matching track, if any
      */
+    /**
+     * Finds the downloaded file whose source url is the given one.
+     *
+     * <p>yt-dlp records the page it downloaded from as {@code webpage_url}, which is the
+     * YouTube url of a track. It lets the bot map a favorited track back to its library file.
+     *
+     * @param url the source url
+     * @return the matching file, if any
+     */
+    public Optional<Path> findBySourceUrl(String url)
+    {
+        if (url == null || url.isBlank())
+            return Optional.empty();
+        for (LibraryTrack track : getTracks())
+        {
+            if (url.equals(metadata(track.path(), "webpage_url"))
+                    || url.equals(metadata(track.path(), "original_url")))
+            {
+                return Optional.of(track.path());
+            }
+        }
+        return Optional.empty();
+    }
+
     public Optional<LibraryTrack> findTrack(String query)
     {
         String needle = normalize(query);

@@ -719,6 +719,86 @@ public class MusicService
         }
     }
 
+    /**
+     * Adds the current track to favorites, or removes it when it is already favorited.
+     *
+     * @param guild the guild
+     * @param member the member that pressed the button
+     * @param output the output adapter to reply on
+     */
+    public void toggleCurrentTrackFavorite(Guild guild, Member member, OutputAdapter output)
+    {
+        if (!requireDJPermission(guild, member, output, "change the favourites"))
+            return;
+
+        AudioHandler handler = getHandler(guild);
+        if (handler == null)
+        {
+            output.replyError("There is no player in this server!");
+            return;
+        }
+
+        AudioTrack currentTrack = handler.getPlayer().getPlayingTrack();
+        if (currentTrack == null)
+        {
+            output.replyError("There is no track currently playing!");
+            return;
+        }
+
+        String favoriteEntry = findFavoriteEntry(handler, currentTrack);
+        if (favoriteEntry != null)
+        {
+            PlaylistLoader.PlaylistResult<Boolean> removal =
+                    bot.getPlaylistLoader().removeItemIfPresentResult(FAVORITES_PLAYLIST_NAME, favoriteEntry);
+            if (!removal.isSuccess())
+            {
+                output.replyError(mapPlaylistErrorToMessage(removal.getError()));
+                return;
+            }
+            handler.markCurrentTrackFavorited(null);
+            output.editNowPlaying(handler);
+            output.replySuccess("Removed " + FormatUtil.filter(FormatUtil.getTrackTitle(currentTrack))
+                    + " from Favorites");
+            return;
+        }
+
+        if (bot.getConfig().libraryEnabled() && bot.getConfig().libraryDownloadOnFavorite())
+            downloadCurrentTrack(guild, member, output);
+        else
+            addCurrentTrackToFavorites(guild, member, output);
+    }
+
+    /**
+     * @param handler the audio handler
+     * @param track the current track
+     * @return the favorites entry that matches the track, or null when it is not favorited
+     */
+    private String findFavoriteEntry(AudioHandler handler, AudioTrack track)
+    {
+        List<String> candidates = new ArrayList<>();
+        String uri = track.getInfo().uri;
+        if (uri != null && !uri.isBlank())
+            candidates.add(uri.trim());
+        String stored = handler.getFavoritedTrackUri();
+        if (stored != null && !stored.isBlank())
+            candidates.add(stored.trim());
+        MusicLibrary library = bot.getMusicLibrary();
+        if (library != null && uri != null && isUriLikeReference(uri))
+            library.findBySourceUrl(uri).ifPresent(path -> candidates.add(path.toAbsolutePath().toString()));
+        if (candidates.isEmpty())
+            return null;
+
+        PlaylistLoader.PlaylistResult<PlaylistLoader.Playlist> result =
+                bot.getPlaylistLoader().getPlaylistResult(FAVORITES_PLAYLIST_NAME);
+        if (!result.isSuccess())
+            return null;
+        List<String> items = result.getValue().getItems();
+        for (String candidate : candidates)
+            if (items.contains(candidate))
+                return candidate;
+        return null;
+    }
+
     public void addCurrentTrackToFavorites(Guild guild, Member member, OutputAdapter output)
     {
         if (!requireDJPermission(guild, member, output, "add the current track to favorites"))
@@ -856,6 +936,11 @@ public class MusicService
                 {
                     LOG.warn("Downloaded {} but could not add it to the favourites playlist: {}",
                             file, appendResult.getError().getMessage());
+                }
+                else
+                {
+                    handler.markCurrentTrackFavorited(file.toAbsolutePath().toString());
+                    output.editNowPlaying(handler);
                 }
                 LOG.info("Downloaded {} to the music library", file);
             }

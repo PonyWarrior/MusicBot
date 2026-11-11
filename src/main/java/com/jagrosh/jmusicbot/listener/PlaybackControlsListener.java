@@ -71,17 +71,9 @@ public class PlaybackControlsListener extends ListenerAdapter {
                 musicService.cycleRepeatMode(event.getGuild(), event.getMember(), OutputAdapters.forPlaybackButton(event));
                 break;
             case "favorite":
-                if (bot.getConfig().libraryEnabled() && bot.getConfig().libraryDownloadOnFavorite())
-                {
-                    // Favoriting a track downloads it to the local music library.
-                    musicService.downloadCurrentTrack(event.getGuild(), event.getMember(),
-                            OutputAdapters.forFavoritePlaybackButton(event));
-                }
-                else
-                {
-                    musicService.addCurrentTrackToFavorites(event.getGuild(), event.getMember(),
-                            OutputAdapters.forFavoritePlaybackButton(event));
-                }
+                // Adds the track to favorites, or removes it when it is already there.
+                musicService.toggleCurrentTrackFavorite(event.getGuild(), event.getMember(),
+                        OutputAdapters.forFavoritePlaybackButton(event));
                 break;
             case "voldown":
                 musicService.adjustVolume(event.getGuild(), event.getMember(), -10, OutputAdapters.forPlaybackButton(event));

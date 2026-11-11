@@ -566,6 +566,67 @@ public class PlaylistLoader
         return Optional.ofNullable(lastStorageError);
     }
 
+    /**
+     * Removes an item from a playlist if it is present.
+     *
+     * @param name the playlist name
+     * @param item the item to remove
+     * @return true when the item was removed, false when it was not there
+     */
+    public PlaylistResult<Boolean> removeItemIfPresentResult(String name, String item)
+    {
+        PlaylistResult<Path> readiness = ensureStorageReady();
+        if(!readiness.isSuccess())
+            return PlaylistResult.failure(readiness.getError());
+
+        String normalizedItem = item == null ? "" : item.trim();
+        if(normalizedItem.isEmpty())
+        {
+            return rememberError(PlaylistErrorType.INVALID_CONFIG,
+                    "Cannot remove an empty playlist item.", config.getPlaylistsFolder(), null);
+        }
+
+        Path path = playlistPath(readiness.getValue(), name);
+        if(!Files.exists(path))
+            return PlaylistResult.success(false);
+
+        boolean favoritesPlaylist = isFavoritesPlaylist(name);
+        try
+        {
+            Set<String> itemsAfterOperation;
+            boolean removed;
+            Path lockKey = path.toAbsolutePath().normalize();
+            Object inProcessLock = inProcessFileLocks.computeIfAbsent(lockKey, ignored -> new Object());
+            synchronized(inProcessLock)
+            {
+                try(FileChannel channel = FileChannel.open(path,
+                        StandardOpenOption.READ, StandardOpenOption.WRITE);
+                    FileLock lock = channel.lock())
+                {
+                    if(!lock.isValid())
+                    {
+                        throw new IOException("Failed to acquire a valid lock for playlist file.");
+                    }
+
+                    Set<String> entries = readPlaylistItemsFromChannel(channel);
+                    removed = entries.remove(normalizedItem);
+                    if(removed)
+                        writePlaylistItemsToChannel(channel, entries);
+                    itemsAfterOperation = entries;
+                }
+            }
+            if(favoritesPlaylist)
+                refreshFavoritesCache(path, itemsAfterOperation);
+            return PlaylistResult.success(removed);
+        }
+        catch(IOException ex)
+        {
+            return rememberError(PlaylistErrorType.STORAGE_UNAVAILABLE,
+                    "Failed to remove an item from playlist `" + name + "`: " + ex.getMessage(),
+                    config.getPlaylistsFolder(), ex);
+        }
+    }
+
     private <T> PlaylistResult<T> rememberError(PlaylistErrorType type, String message, String configuredPath, Throwable cause)
     {
         PlaylistError error = PlaylistError.of(type, message, configuredPath, cause);
@@ -604,6 +665,17 @@ public class PlaylistLoader
                 channel.write(ByteBuffer.wrap(new byte[]{CR, LF}));
         }
         channel.write(ByteBuffer.wrap(value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private void writePlaylistItemsToChannel(FileChannel channel, Set<String> items) throws IOException
+    {
+        StringBuilder content = new StringBuilder();
+        for(String item : items)
+            content.append(item).append('\n');
+        channel.position(0);
+        channel.truncate(0);
+        channel.write(ByteBuffer.wrap(content.toString().getBytes(StandardCharsets.UTF_8)));
+        channel.force(true);
     }
 
     private Set<String> readPlaylistItemsFromChannel(FileChannel channel) throws IOException

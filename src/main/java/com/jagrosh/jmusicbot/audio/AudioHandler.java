@@ -473,6 +473,14 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         favoritedTrackUri = uri;
     }
 
+    /**
+     * @return the favorites entry of the current track, or null when it is not favorited
+     */
+    public String getFavoritedTrackUri()
+    {
+        return favoritedTrackUri;
+    }
+
     public boolean isCurrentTrackFavorited()
     {
         AudioTrack currentTrack = audioPlayer.getPlayingTrack();

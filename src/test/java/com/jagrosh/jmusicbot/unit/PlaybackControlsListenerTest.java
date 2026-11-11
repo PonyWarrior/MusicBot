@@ -226,14 +226,14 @@ public class PlaybackControlsListenerTest {
 
             listener.onButtonInteraction(fixture.getButtonInteractionEvent());
 
-            verify(fixture.getMusicService()).addCurrentTrackToFavorites(
+            verify(fixture.getMusicService()).toggleCurrentTrackFavorite(
                     eq(fixture.getGuild()),
                     eq(fixture.getMember()),
                     any(MusicService.OutputAdapter.class)
             );
 
             ArgumentCaptor<MusicService.OutputAdapter> captor = ArgumentCaptor.forClass(MusicService.OutputAdapter.class);
-            verify(fixture.getMusicService()).addCurrentTrackToFavorites(
+            verify(fixture.getMusicService()).toggleCurrentTrackFavorite(
                     eq(fixture.getGuild()),
                     eq(fixture.getMember()),
                     captor.capture()
@@ -261,7 +261,7 @@ public class PlaybackControlsListenerTest {
             listener.onButtonInteraction(fixture.getButtonInteractionEvent());
 
             ArgumentCaptor<MusicService.OutputAdapter> captor = ArgumentCaptor.forClass(MusicService.OutputAdapter.class);
-            verify(fixture.getMusicService()).addCurrentTrackToFavorites(
+            verify(fixture.getMusicService()).toggleCurrentTrackFavorite(
                     eq(fixture.getGuild()),
                     eq(fixture.getMember()),
                     captor.capture()
