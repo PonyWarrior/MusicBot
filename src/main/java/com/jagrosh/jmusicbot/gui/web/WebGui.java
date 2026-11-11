@@ -16,10 +16,13 @@
 package com.jagrosh.jmusicbot.gui.web;
 
 import com.jagrosh.jmusicbot.Bot;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
+import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,6 +65,29 @@ public final class WebGui
                 stage.setOnCloseRequest(event -> bot.shutdown());
                 stage.show();
                 LOG.info("Web GUI window opened at {}", url);
+
+                // Keep the native title bar in step with the web UI's light/dark mode.
+                final boolean[] lastDark = {false};
+                Timeline themeWatcher = new Timeline(new KeyFrame(Duration.seconds(1), event ->
+                {
+                    try
+                    {
+                        Object theme = view.getEngine().executeScript(
+                                "document.documentElement.getAttribute('data-theme')");
+                        boolean dark = "dark".equals(String.valueOf(theme));
+                        if (dark != lastDark[0])
+                        {
+                            lastDark[0] = dark;
+                            WindowsTitleBar.setDark("JMusicBot", dark);
+                        }
+                    }
+                    catch (Exception ignored)
+                    {
+                        // The page is not ready yet.
+                    }
+                }));
+                themeWatcher.setCycleCount(Timeline.INDEFINITE);
+                themeWatcher.play();
             }
             catch (Throwable t)
             {

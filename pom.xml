@@ -323,6 +323,13 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- JNA is already bundled by JDA; declared here so the Windows title bar can be themed. -->
+        <dependency>
+            <groupId>net.java.dev.jna</groupId>
+            <artifactId>jna</artifactId>
+            <version>4.4.0</version>
+        </dependency>
+
         <!-- Dropping JLyrics since it is not being maintained / not working anymore -->
         <!-- <dependency>
             <groupId>com.github.jagrosh</groupId>

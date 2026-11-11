@@ -198,6 +198,7 @@ public class WebServer
             }
 
             Config config = ConfigFactory.parseFile(path.toFile()).resolve();
+            Config defaults = loadDefaults();
             List<Map<String, Object>> entries = new ArrayList<>();
             for (Map.Entry<String, ConfigValue> entry : config.entrySet())
             {
@@ -230,6 +231,19 @@ public class WebServer
                         item.put("value", config.getString(key));
                     }
                 }
+
+                if (defaults.hasPath(key))
+                {
+                    ConfigValue defaultValue = defaults.getValue(key);
+                    switch (defaultValue.valueType())
+                    {
+                        case BOOLEAN -> item.put("defaultValue", defaults.getBoolean(key));
+                        case NUMBER -> item.put("defaultValue", defaultValue.unwrapped());
+                        case LIST -> item.put("defaultValue", defaults.getStringList(key));
+                        default -> item.put("defaultValue", defaults.getString(key));
+                    }
+                }
+                item.put("resettable", !key.equals("discord.token") && !key.equals("discord.owner"));
                 entries.add(item);
             }
             entries.sort(Comparator.comparing(item -> String.valueOf(item.get("key"))));
@@ -341,6 +355,29 @@ public class WebServer
                 return headless.toAbsolutePath().normalize();
         }
         return null;
+    }
+
+    /**
+     * The defaults used by the reset buttons. A packaged {@code config.defaults} wins, so a
+     * distribution can reset to its own intended values (for example the bundled yt-dlp).
+     *
+     * @return the default configuration
+     */
+    private static Config loadDefaults()
+    {
+        Path packaged = OtherUtil.getPath("config.defaults");
+        if (Files.isRegularFile(packaged))
+        {
+            try
+            {
+                return ConfigFactory.parseFile(packaged.toFile()).resolve();
+            }
+            catch (Exception e)
+            {
+                LOG.warn("Could not read config.defaults, using the built-in defaults: {}", e.getMessage());
+            }
+        }
+        return ConfigIO.loadDefaults();
     }
 
     private static String renderHocon(String type, Object value)
