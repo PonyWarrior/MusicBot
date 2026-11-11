@@ -286,10 +286,17 @@ public class WebServer
     {
         try
         {
-            String launcher = Files.isRegularFile(OtherUtil.getPath("run-gui.bat")) ? "run-gui.bat" : "run.bat";
-            ProcessBuilder builder = new ProcessBuilder("cmd", "/c",
-                    "ping", "-n", "3", "127.0.0.1", ">", "nul", "&", "start", "", launcher);
-            builder.directory(Path.of(".").toAbsolutePath().normalize().toFile());
+            Path launcher = findLauncher();
+            if (launcher == null)
+            {
+                LOG.error("Could not find run-gui.bat or run.bat next to the jar; restart manually.");
+                bot.shutdown();
+                return;
+            }
+
+            String command = "ping -n 3 127.0.0.1 >nul & start \"\" /min \"" + launcher + "\"";
+            ProcessBuilder builder = new ProcessBuilder("cmd", "/c", command);
+            builder.directory(launcher.getParent().toFile());
             builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
             builder.redirectError(ProcessBuilder.Redirect.DISCARD);
             builder.start();
@@ -300,6 +307,39 @@ public class WebServer
             LOG.error("Could not start the launcher for a restart: {}", e.getMessage());
         }
         bot.shutdown();
+    }
+
+    /**
+     * Finds the launcher next to the jar, falling back to the working directory.
+     *
+     * @return the launcher, or null when neither run-gui.bat nor run.bat exists
+     */
+    private static Path findLauncher()
+    {
+        List<Path> directories = new ArrayList<>();
+        try
+        {
+            Path location = Path.of(JMusicBot.class.getProtectionDomain().getCodeSource()
+                    .getLocation().toURI());
+            directories.add(Files.isDirectory(location) ? location : location.getParent());
+        }
+        catch (Exception ignored)
+        {
+        }
+        directories.add(Path.of(".").toAbsolutePath().normalize());
+
+        for (Path directory : directories)
+        {
+            if (directory == null)
+                continue;
+            Path gui = directory.resolve("run-gui.bat");
+            if (Files.isRegularFile(gui))
+                return gui.toAbsolutePath().normalize();
+            Path headless = directory.resolve("run.bat");
+            if (Files.isRegularFile(headless))
+                return headless.toAbsolutePath().normalize();
+        }
+        return null;
     }
 
     private static String renderHocon(String type, Object value)
