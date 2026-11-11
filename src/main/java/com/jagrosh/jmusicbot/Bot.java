@@ -33,6 +33,7 @@ import com.jagrosh.jmusicbot.service.SearchService;
 import com.jagrosh.jmusicbot.library.MusicLibrary;
 import com.jagrosh.jmusicbot.library.YtDlpDownloader;
 import com.jagrosh.jmusicbot.utils.InstanceLock;
+import com.jagrosh.jmusicbot.web.WebServer;
 import com.jagrosh.jmusicbot.utils.OtherUtil;
 import com.jagrosh.jmusicbot.utils.YoutubeOauth2TokenHandler;
 import net.dv8tion.jda.api.JDA;
@@ -74,6 +75,7 @@ public class Bot
     private boolean shuttingDown = false;
     private JDA jda;
     private JFrame gui;
+    private WebServer webServer;
     private CommandClient commandClient;
     
     public Bot(EventWaiter waiter, BotConfig config, SettingsManager settings, UserInteraction userInteraction)
@@ -316,6 +318,8 @@ public class Bot
 
         if (gui != null)
             gui.dispose();
+        if (webServer != null)
+            webServer.stop();
         InstanceLock.release();
         System.exit(0);
     }
@@ -328,6 +332,14 @@ public class Bot
     public void setGUI(JFrame gui)
     {
         this.gui = gui;
+    }
+
+    /**
+     * @param webServer the web GUI server, stopped on shutdown
+     */
+    public void setWebServer(WebServer webServer)
+    {
+        this.webServer = webServer;
     }
 
     public void setCommandClient(CommandClient commandClient)

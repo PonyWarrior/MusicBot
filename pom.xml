@@ -285,6 +285,44 @@
             <version>${youtube-source.version}</version>
         </dependency>
 
+        <!-- JavaFX for the web GUI. Provided: the launcher puts the platform jars on the
+             module path, so they are not shaded into the bot jar. -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-base</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>win</classifier>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>win</classifier>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>win</classifier>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-media</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>win</classifier>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-web</artifactId>
+            <version>${javafx.version}</version>
+            <classifier>win</classifier>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- Dropping JLyrics since it is not being maintained / not working anymore -->
         <!-- <dependency>
             <groupId>com.github.jagrosh</groupId>
@@ -603,6 +641,7 @@
         <udpqueue.version>0.2.12</udpqueue.version>
         <lavaplayer.version>2.2.7</lavaplayer.version>
         <youtube-source.version>1.18.2</youtube-source.version>
+        <javafx.version>25.0.5</javafx.version>
         <logback.version>1.5.25</logback.version>
         <typesafe-config.version>1.4.3</typesafe-config.version>
         <jsoup.version>1.22.1</jsoup.version>

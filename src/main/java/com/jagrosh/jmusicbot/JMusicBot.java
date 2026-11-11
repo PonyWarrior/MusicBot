@@ -22,6 +22,8 @@ import com.jagrosh.jmusicbot.commands.v1.CommandFactory;
 import com.jagrosh.jmusicbot.entities.Prompt;
 import com.jagrosh.jmusicbot.entities.UserInteraction;
 import com.jagrosh.jmusicbot.gui.MainFrame;
+import com.jagrosh.jmusicbot.gui.web.WebGui;
+import com.jagrosh.jmusicbot.web.WebServer;
 import com.jagrosh.jmusicbot.gui.theme.ThemeManager;
 import com.jagrosh.jmusicbot.settings.SettingsManager;
 import com.jagrosh.jmusicbot.utils.ConsoleUtil;
@@ -54,6 +56,14 @@ public class JMusicBot
      * The local signature cipher service, if one was started.
      */
     private static LocalCipherService localCipherService = null;
+
+    /**
+     * @return the local cipher service, or null when it is not running
+     */
+    public static LocalCipherService getLocalCipherService()
+    {
+        return localCipherService;
+    }
     public final static Permission[] RECOMMENDED_PERMS = {
             Permission.VIEW_CHANNEL,
             Permission.MESSAGE_SEND,
@@ -134,6 +144,20 @@ public class JMusicBot
         }
     }
 
+    private static void startSwingGui(Bot bot)
+    {
+        try
+        {
+            MainFrame mainFrame = new MainFrame(bot);
+            bot.setGUI(mainFrame);
+            mainFrame.init();
+        }
+        catch (Exception e)
+        {
+            LOG.error("Could not start GUI. Use -Dnogui=true for server environments.", e);
+        }
+    }
+
     private static void startBot()
     {
         // Create user interaction handler for startup
@@ -194,6 +218,7 @@ public class JMusicBot
         // Single source of truth for GUI: combines -Dnogui and config gui.enabled.
         // This matches the logic in Bot.isNoGUI().
         boolean guiEnabled = !userInteraction.isNoGUI() && config.getGuiEnabled();
+        boolean webGui = guiEnabled && !"swing".equalsIgnoreCase(config.getGuiMode());
         
         // Get buffered early output before we change streams again
         String earlyOutput = null;
@@ -207,7 +232,7 @@ public class JMusicBot
             }
         }
         
-        if (guiEnabled)
+        if (guiEnabled && !webGui)
         {
             // Initialize theme before creating any Swing components
             try
@@ -234,7 +259,7 @@ public class JMusicBot
         }
         else
         {
-            // GUI disabled: restore original streams (discard buffer)
+            // GUI disabled or web GUI: restore original streams (discard buffer)
             if (teeOut != null)
             {
                 System.setOut(originalOut);
@@ -252,17 +277,24 @@ public class JMusicBot
 
         if (guiEnabled)
         {
-            try
+            if (webGui)
             {
-                MainFrame mainFrame = new MainFrame(bot);
-                bot.setGUI(mainFrame);
-                mainFrame.init();
+                WebServer webServer = new WebServer(bot);
+                int port = webServer.start();
+                if (port > 0)
+                {
+                    bot.setWebServer(webServer);
+                    WebGui.start(bot, "http://127.0.0.1:" + port + "/");
+                }
+                else
+                {
+                    LOG.error("Could not start the web GUI, falling back to the Swing GUI");
+                    startSwingGui(bot);
+                }
             }
-            catch (Exception e)
+            else
             {
-                LOG.error("Could not start GUI. Use -Dnogui=true for server environments.", e);
-                userInteraction.alert(UserInteraction.Level.ERROR, "JMusicBot",
-                        "Could not start GUI.\nUse -Dnogui=true for server environments.");
+                startSwingGui(bot);
             }
         }
         

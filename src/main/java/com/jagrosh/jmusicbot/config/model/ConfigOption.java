@@ -94,6 +94,7 @@ public enum ConfigOption {
     
     // GUI options
     GUI_ENABLED("gui.enabled", ConfigType.BOOLEAN, false, "Enable or disable the GUI (default true)"),
+    GUI_MODE("gui.mode", ConfigType.STRING, false, "GUI mode: web (Astryx web UI) or swing (legacy)"),
     GUI_THEME("gui.theme", ConfigType.STRING, false, "GUI theme: light, dark, darcula, intellij"),
     GUI_FONT_SIZE("gui.fontSize", ConfigType.INT, false, "Base font size for GUI components (8-24)"),
     

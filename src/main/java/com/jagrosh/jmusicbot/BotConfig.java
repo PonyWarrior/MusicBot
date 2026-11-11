@@ -66,6 +66,7 @@ public class BotConfig {
             successEmoji, warningEmoji, errorEmoji, loadingEmoji, searchingEmoji,
             evalEngine, guiTheme, youtubeRemoteCipher, localCipherDirectory, localCipherCommand;
     private boolean stayInChannel, songInGame, npImages, npMinimalMessage, npShowButtons, showNpProgressBar, updatealerts, useEval, dbots, useYouTubeOauth, guiEnabled, localCipherEnabled;
+    private String guiMode;
     private long owner, maxSeconds, aloneTimeUntilStop;
     private long clearChannelAgeDays;
     private int maxYTPlaylistPages, maxHistorySize, guiFontSize, nasBufferMs, frameBufferMs, proxyPort, clearChannelDeleteLimit, localCipherPort, localCipherStartupTimeout;
@@ -315,6 +316,7 @@ public class BotConfig {
         
         // GUI options
         guiEnabled = GUI_ENABLED.hasValue(config) ? GUI_ENABLED.getBoolean(config) : true;
+        guiMode = GUI_MODE.hasValue(config) ? GUI_MODE.getString(config) : "web";
         guiTheme = GUI_THEME.getString(config);
         guiFontSize = GUI_FONT_SIZE.getInt(config);
         
@@ -707,6 +709,13 @@ public class BotConfig {
 
     public boolean getGuiEnabled() {
         return guiEnabled;
+    }
+
+    /**
+     * @return the GUI mode: "web" for the Astryx web UI, "swing" for the legacy window
+     */
+    public String getGuiMode() {
+        return guiMode == null ? "web" : guiMode;
     }
 
     public String getGuiTheme() {
