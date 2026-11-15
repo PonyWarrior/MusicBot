@@ -38,10 +38,12 @@ class LocalTrackTest
     class IsLocalTrackTests
     {
         @Test
-        @DisplayName("A track with an absolute Windows path is local")
+        @DisplayName("A track with an absolute Windows path is local on Windows only")
         void absoluteWindowsPathIsLocal() throws Exception
         {
-            assertTrue(isLocalTrack(mock(AudioTrack.class),
+            // The mirror of the POSIX case: C:\... is only a native path on Windows.
+            boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
+            assertEquals(windows, isLocalTrack(mock(AudioTrack.class),
                     "C:\\Music\\Example Song (Remix).flac"));
         }
 
