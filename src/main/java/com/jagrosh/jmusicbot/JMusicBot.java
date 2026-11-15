@@ -281,12 +281,26 @@ public class JMusicBot
             {
                 WebServer webServer = new WebServer(bot);
                 int port = webServer.start();
+                boolean opened = false;
                 if (port > 0)
                 {
-                    bot.setWebServer(webServer);
-                    WebGui.start(bot, "http://127.0.0.1:" + port + "/");
+                    try
+                    {
+                        WebGui.start(bot, "http://127.0.0.1:" + port + "/");
+                        bot.setWebServer(webServer);
+                        opened = true;
+                    }
+                    catch (Throwable t)
+                    {
+                        // JavaFX is not part of the jar. Started without --module-path this is a
+                        // NoClassDefFoundError, which would otherwise leave a windowless process
+                        // holding the instance lock.
+                        LOG.error("Could not open the web GUI window (is JavaFX on the module path?): {}",
+                                t.toString());
+                        webServer.stop();
+                    }
                 }
-                else
+                if (!opened)
                 {
                     LOG.error("Could not start the web GUI, falling back to the Swing GUI");
                     startSwingGui(bot);

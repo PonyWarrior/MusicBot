@@ -46,6 +46,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  *
@@ -72,7 +73,7 @@ public class Bot
     private final YtDlpDownloader ytdlp;
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(Bot.class);
     
-    private boolean shuttingDown = false;
+    private final AtomicBoolean shuttingDown = new AtomicBoolean();
     private JDA jda;
     private JFrame gui;
     private WebServer webServer;
@@ -293,35 +294,54 @@ public class Bot
      */
     public void shutdown()
     {
-        if (shuttingDown)
+        // The window, the restart button and the shutdown command can all get here at once.
+        if (!shuttingDown.compareAndSet(false, true))
             return;
-        shuttingDown = true;
 
-        // Clean up audio connections first (before shutting down thread pool, as these may trigger events that use it)
-        if (jda != null && jda.getStatus() != JDA.Status.SHUTTING_DOWN)
+        // Whatever goes wrong while cleaning up, the lock must be released and the JVM must
+        // exit; otherwise a half-closed bot keeps the folder locked until it is killed by hand.
+        try
         {
-            jda.getGuilds().stream().forEach(g ->
+            // Clean up audio connections first (before shutting down thread pool, as these may trigger events that use it)
+            if (jda != null && jda.getStatus() != JDA.Status.SHUTTING_DOWN)
             {
-                AudioHandler ah = (AudioHandler) g.getAudioManager().getSendingHandler();
-                if (ah != null)
+                for (Guild g : jda.getGuilds())
                 {
-                    ah.stopAndClear();
-                    ah.getPlayer().destroy();
+                    try
+                    {
+                        AudioHandler ah = (AudioHandler) g.getAudioManager().getSendingHandler();
+                        if (ah != null)
+                        {
+                            ah.stopAndClear();
+                            ah.getPlayer().destroy();
+                        }
+                        g.getAudioManager().closeAudioConnection();
+                    }
+                    catch (RuntimeException e)
+                    {
+                        LOGGER.warn("Could not close the audio connection of guild {}: {}", g.getId(), e.toString());
+                    }
                 }
-                g.getAudioManager().closeAudioConnection();
-            });
-            jda.shutdown();
+                jda.shutdown();
+            }
+
+            // Shut down thread pool after audio cleanup to avoid RejectedExecutionException
+            threadpool.shutdownNow();
+
+            if (gui != null)
+                gui.dispose();
+            if (webServer != null)
+                webServer.stop();
         }
-
-        // Shut down thread pool after audio cleanup to avoid RejectedExecutionException
-        threadpool.shutdownNow();
-
-        if (gui != null)
-            gui.dispose();
-        if (webServer != null)
-            webServer.stop();
-        InstanceLock.release();
-        System.exit(0);
+        catch (RuntimeException e)
+        {
+            LOGGER.error("Shutdown did not finish cleanly", e);
+        }
+        finally
+        {
+            InstanceLock.release();
+            System.exit(0);
+        }
     }
 
     public void setJDA(JDA jda)

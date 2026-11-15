@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.web;
 
+import com.fasterxml.jackson.core.JacksonException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.JMusicBot;
@@ -30,6 +31,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import com.typesafe.config.Config;
+import com.typesafe.config.ConfigException;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.ConfigValue;
 import com.typesafe.config.parser.ConfigDocument;
@@ -45,10 +47,12 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.management.ManagementFactory;
+import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -156,7 +160,26 @@ public class WebServer
                 sendJson(exchange, 403, Map.of("error", "forbidden"));
                 return;
             }
-            handler.handle(exchange);
+            try
+            {
+                handler.handle(exchange);
+            }
+            catch (IOException | RuntimeException e)
+            {
+                // Without an answer the page waits until its request times out.
+                boolean badRequest = e instanceof JacksonException || e instanceof ClassCastException;
+                if (!badRequest)
+                    LOG.warn("Web GUI request {} failed: {}", exchange.getRequestURI().getPath(), e.toString());
+                try
+                {
+                    sendJson(exchange, badRequest ? 400 : 500,
+                            Map.of("ok", false, "error", badRequest ? "invalid request" : "internal error"));
+                }
+                catch (IOException | RuntimeException alreadyAnswered)
+                {
+                    exchange.close();
+                }
+            }
         };
     }
 
@@ -290,23 +313,15 @@ public class WebServer
             try
             {
                 Map<?, ?> body = MAPPER.readValue(exchange.getRequestBody().readAllBytes(), Map.class);
-                Map<?, ?> values = (Map<?, ?>) body.get("values");
-                if (values == null)
+                if (!(body.get("values") instanceof Map<?, ?> values))
                     throw new IllegalArgumentException("missing values");
 
-                ConfigDocument document = ConfigDocumentFactory.parseFile(path.toFile());
-                for (Map.Entry<?, ?> entry : values.entrySet())
-                {
-                    String key = String.valueOf(entry.getKey());
-                    Map<?, ?> item = (Map<?, ?>) entry.getValue();
-                    String type = String.valueOf(item.get("type"));
-                    Object value = item.get("value");
-                    // An empty secret means "leave it alone"; the page never receives the value.
-                    if (isSecretKey(key) && String.valueOf(value).isBlank())
-                        continue;
-                    document = document.withValueText(key, renderHocon(type, value));
-                }
-                Files.writeString(path, document.render(), StandardCharsets.UTF_8);
+                String updated = applySettings(
+                        Files.readString(path, StandardCharsets.UTF_8), loadDefaults(), values);
+                // Write next to the file and swap it in, so a crash cannot leave half a config.
+                Path temp = path.resolveSibling(path.getFileName() + ".tmp");
+                Files.writeString(temp, updated, StandardCharsets.UTF_8);
+                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
                 sendJson(exchange, 200, Map.of("ok", true, "restartRequired", true));
             }
             catch (Exception e)
@@ -351,40 +366,56 @@ public class WebServer
             sendJson(exchange, 405, Map.of("error", "method not allowed"));
             return;
         }
-        sendJson(exchange, 200, Map.of("ok", true));
-        restartBot();
-    }
-
-    /**
-     * Starts the launcher again after a short delay, then shuts this process down. The delay
-     * lets the instance lock be released before the new process starts.
-     */
-    private void restartBot()
-    {
+        // Only shut down once something is in place to start the bot again; a restart button
+        // that just closes the bot is worse than one that reports it cannot restart.
+        Path launcher = findLauncher();
+        if (launcher == null)
+        {
+            LOG.error("Could not find run-gui.bat or run.bat next to the jar; restart manually.");
+            sendJson(exchange, 500, Map.of("ok", false,
+                    "error", "run-gui.bat or run.bat was not found next to the jar. Restart the bot manually."));
+            return;
+        }
         try
         {
-            Path launcher = findLauncher();
-            if (launcher == null)
-            {
-                LOG.error("Could not find run-gui.bat or run.bat next to the jar; restart manually.");
-                bot.shutdown();
-                return;
-            }
-
-            String command = "ping -n 3 127.0.0.1 >nul & powershell -NoProfile -WindowStyle Hidden "
-                    + "-Command \"Start-Process -FilePath '" + launcher + "' -WindowStyle Hidden\"";
-            ProcessBuilder builder = new ProcessBuilder("cmd", "/c", command);
-            builder.directory(launcher.getParent().toFile());
-            builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-            builder.redirectError(ProcessBuilder.Redirect.DISCARD);
-            builder.start();
-            LOG.info("Restarting with {}", launcher);
+            startRelauncher(launcher, ProcessHandle.current().pid());
         }
         catch (IOException e)
         {
             LOG.error("Could not start the launcher for a restart: {}", e.getMessage());
+            sendJson(exchange, 500, Map.of("ok", false,
+                    "error", "The launcher could not be started. Restart the bot manually."));
+            return;
         }
+        LOG.info("Restarting with {}", launcher);
+        sendJson(exchange, 200, Map.of("ok", true));
         bot.shutdown();
+    }
+
+    /**
+     * Starts a helper that waits for the given process to exit and then runs the launcher.
+     *
+     * <p>Waiting for the process, instead of a fixed delay, means the new bot only starts after
+     * this one has released the instance lock and stopped the cipher server. The launcher path
+     * and the process id travel in environment variables, so no quoting of the path is needed.
+     *
+     * @param launcher the batch file to run
+     * @param pid the process to wait for
+     * @return the helper process
+     * @throws IOException when the helper cannot be started
+     */
+    public static Process startRelauncher(Path launcher, long pid) throws IOException
+    {
+        ProcessBuilder builder = new ProcessBuilder("powershell", "-NoProfile", "-WindowStyle", "Hidden",
+                "-Command",
+                "Wait-Process -Id $env:JMB_RESTART_PID -Timeout 60 -ErrorAction SilentlyContinue; "
+                        + "Start-Process -FilePath $env:JMB_RESTART_LAUNCHER -WindowStyle Hidden");
+        builder.environment().put("JMB_RESTART_PID", Long.toString(pid));
+        builder.environment().put("JMB_RESTART_LAUNCHER", launcher.toString());
+        builder.directory(launcher.getParent().toFile());
+        builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+        builder.redirectError(ProcessBuilder.Redirect.DISCARD);
+        return builder.start();
     }
 
     /**
@@ -505,20 +536,101 @@ public class WebServer
         return "discord.token".equals(key);
     }
 
-    private static String renderHocon(String type, Object value)
+    /**
+     * Applies edited settings to the text of {@code config.txt}, keeping its comments.
+     *
+     * <p>Only settings that already exist in the file can be changed, and each value is written
+     * in the type the setting has (taken from the defaults, else from the file) rather than the
+     * type the request claims. The result is parsed again before it is returned, so a file the
+     * bot could not read back is never written.
+     *
+     * @param hocon the current file contents
+     * @param defaults the default configuration, used for the type of each setting; may be null
+     * @param values setting key to a map holding the new {@code value}
+     * @return the new file contents
+     * @throws IllegalArgumentException when a key is unknown or a value does not fit its setting
+     */
+    public static String applySettings(String hocon, Config defaults, Map<?, ?> values)
     {
-        return switch (type)
+        Config current = ConfigFactory.parseString(hocon).resolve();
+        ConfigDocument document = ConfigDocumentFactory.parseString(hocon);
+        for (Map.Entry<?, ?> entry : values.entrySet())
         {
-            case "boolean" -> Boolean.parseBoolean(String.valueOf(value)) ? "true" : "false";
-            case "number" ->
+            String key = String.valueOf(entry.getKey());
+            if (key.equals("meta.configVersion") || !hasSetting(current, key))
+                throw new IllegalArgumentException("unknown setting: " + key);
+
+            Object value = entry.getValue() instanceof Map<?, ?> item ? item.get("value") : null;
+            if (value == null)
+                throw new IllegalArgumentException(key + " has no value");
+            // An empty secret means "leave it alone"; the page never receives the value.
+            if (isSecretKey(key) && String.valueOf(value).isBlank())
+                continue;
+
+            ConfigValue shape = defaults != null && hasSetting(defaults, key)
+                    ? defaults.getValue(key)
+                    : current.getValue(key);
+            document = document.withValueText(key, renderHocon(key, shape, value));
+        }
+
+        String rendered = document.render();
+        try
+        {
+            ConfigFactory.parseString(rendered).resolve();
+        }
+        catch (ConfigException e)
+        {
+            throw new IllegalArgumentException("the settings would not be readable: " + e.getMessage());
+        }
+        return rendered;
+    }
+
+    private static boolean hasSetting(Config config, String key)
+    {
+        try
+        {
+            return config.hasPath(key);
+        }
+        catch (ConfigException e)
+        {
+            return false;
+        }
+    }
+
+    private static String renderHocon(String key, ConfigValue shape, Object value)
+    {
+        return switch (shape.valueType())
+        {
+            case BOOLEAN ->
             {
                 String text = String.valueOf(value).trim();
-                Double.parseDouble(text);
+                if (!text.equals("true") && !text.equals("false"))
+                    throw new IllegalArgumentException(key + " must be true or false");
                 yield text;
             }
-            case "list" ->
+            case NUMBER ->
             {
-                List<?> list = value instanceof List<?> l ? l : List.of();
+                BigDecimal number;
+                try
+                {
+                    // Unlike Double.parseDouble this refuses NaN, Infinity and suffixes like 1d.
+                    number = new BigDecimal(String.valueOf(value).trim());
+                }
+                catch (NumberFormatException e)
+                {
+                    throw new IllegalArgumentException(key + " must be a number");
+                }
+                boolean whole = shape.unwrapped() instanceof Integer || shape.unwrapped() instanceof Long;
+                if (!whole)
+                    yield number.toPlainString();
+                if (number.stripTrailingZeros().scale() > 0)
+                    throw new IllegalArgumentException(key + " must be a whole number");
+                yield number.toBigInteger().toString();
+            }
+            case LIST ->
+            {
+                if (!(value instanceof List<?> list))
+                    throw new IllegalArgumentException(key + " must be a list");
                 StringBuilder builder = new StringBuilder("[ ");
                 for (int i = 0; i < list.size(); i++)
                 {
@@ -528,7 +640,8 @@ public class WebServer
                 }
                 yield builder.append(" ]").toString();
             }
-            default -> quote(String.valueOf(value));
+            case STRING -> quote(String.valueOf(value));
+            default -> throw new IllegalArgumentException(key + " cannot be edited here");
         };
     }
 
