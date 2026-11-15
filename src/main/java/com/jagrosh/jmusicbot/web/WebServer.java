@@ -27,6 +27,7 @@ import com.jagrosh.jmusicbot.settings.RepeatMode;
 import com.jagrosh.jmusicbot.settings.Settings;
 import com.jagrosh.jmusicbot.utils.OtherUtil;
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
@@ -99,13 +100,13 @@ public class WebServer
         try
         {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-            server.createContext("/api/state", this::handleState);
-            server.createContext("/api/logs", this::handleLogs);
-            server.createContext("/api/settings", this::handleSettings);
-            server.createContext("/api/action", this::handleAction);
-            server.createContext("/api/restart", this::handleRestart);
-            server.createContext("/api/theme", this::handleTheme);
-            server.createContext("/", this::handleStatic);
+            server.createContext("/api/state", guarded(this::handleState));
+            server.createContext("/api/logs", guarded(this::handleLogs));
+            server.createContext("/api/settings", guarded(this::handleSettings));
+            server.createContext("/api/action", guarded(this::handleAction));
+            server.createContext("/api/restart", guarded(this::handleRestart));
+            server.createContext("/api/theme", guarded(this::handleTheme));
+            server.createContext("/", guarded(this::handleStatic));
             server.setExecutor(Executors.newFixedThreadPool(4, runnable ->
             {
                 Thread thread = new Thread(runnable, "web-gui");
@@ -136,6 +137,35 @@ public class WebServer
     public int getPort()
     {
         return port;
+    }
+
+    /**
+     * Rejects requests that were not addressed to this loopback endpoint. Binding to
+     * {@code 127.0.0.1} is not enough on its own: DNS rebinding makes an attacker's page appear
+     * same-origin, so the {@code Host} and {@code Origin} headers are checked instead of assumed.
+     *
+     * @param handler the handler to guard
+     * @return a handler that answers 403 for foreign requests
+     */
+    private HttpHandler guarded(HttpHandler handler)
+    {
+        return exchange ->
+        {
+            if (!isLocalRequest(exchange))
+            {
+                sendJson(exchange, 403, Map.of("error", "forbidden"));
+                return;
+            }
+            handler.handle(exchange);
+        };
+    }
+
+    private boolean isLocalRequest(HttpExchange exchange)
+    {
+        return LocalRequestGuard.allows(
+                exchange.getRequestHeaders().getFirst("Host"),
+                exchange.getRequestHeaders().getFirst("Origin"),
+                port);
     }
 
     // ========== API ==========
@@ -207,8 +237,10 @@ public class WebServer
                 if (key.equals("meta.configVersion"))
                     continue;
 
+                boolean secret = isSecretKey(key);
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("key", key);
+                item.put("secret", secret);
                 switch (entry.getValue().valueType())
                 {
                     case BOOLEAN ->
@@ -229,7 +261,8 @@ public class WebServer
                     default ->
                     {
                         item.put("type", "string");
-                        item.put("value", config.getString(key));
+                        // Never send the bot token to the page; it is write-only.
+                        item.put("value", secret ? "" : config.getString(key));
                     }
                 }
 
@@ -268,6 +301,9 @@ public class WebServer
                     Map<?, ?> item = (Map<?, ?>) entry.getValue();
                     String type = String.valueOf(item.get("type"));
                     Object value = item.get("value");
+                    // An empty secret means "leave it alone"; the page never receives the value.
+                    if (isSecretKey(key) && String.valueOf(value).isBlank())
+                        continue;
                     document = document.withValueText(key, renderHocon(type, value));
                 }
                 Files.writeString(path, document.render(), StandardCharsets.UTF_8);
@@ -284,15 +320,12 @@ public class WebServer
 
     private void handleTheme(HttpExchange exchange) throws IOException
     {
-        Path file = OtherUtil.getPath("gui-theme.txt");
+        Path file = themeFile();
         if ("GET".equalsIgnoreCase(exchange.getRequestMethod()))
         {
-            String mode = Files.isRegularFile(file)
-                    ? Files.readString(file, StandardCharsets.UTF_8).trim()
-                    : "light";
-            if (!mode.equals("dark"))
-                mode = "light";
-            sendJson(exchange, 200, Map.of("mode", mode));
+            String saved = readThemeMode();
+            // "system" lets the page follow the OS until the user picks a side.
+            sendJson(exchange, 200, Map.of("mode", saved == null ? "system" : saved));
             return;
         }
         if ("POST".equalsIgnoreCase(exchange.getRequestMethod()))
@@ -408,6 +441,68 @@ public class WebServer
             }
         }
         return ConfigIO.loadDefaults();
+    }
+
+    private static Path themeFile()
+    {
+        return OtherUtil.getPath("gui-theme.txt");
+    }
+
+    /**
+     * Reads the theme the user picked last time.
+     *
+     * @return {@code "light"} or {@code "dark"}, or null when the user has never picked one
+     */
+    static String readThemeMode()
+    {
+        Path file = themeFile();
+        if (!Files.isRegularFile(file))
+            return null;
+        try
+        {
+            String mode = Files.readString(file, StandardCharsets.UTF_8).trim();
+            return mode.equals("dark") || mode.equals("light") ? mode : null;
+        }
+        catch (IOException e)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * Writes the saved theme into the served {@code index.html} so the first paint already
+     * matches it. Without this the page renders light until the theme request resolves, which
+     * is a visible flash on every dark-mode start.
+     *
+     * @param html the file contents
+     * @param mode {@code "light"}, {@code "dark"} or null to leave the file untouched
+     * @return the contents with {@code data-theme} set on the root element
+     */
+    static String injectTheme(String html, String mode)
+    {
+        if (mode == null || (!mode.equals("light") && !mode.equals("dark")))
+            return html;
+
+        int start = html.indexOf("<html");
+        if (start < 0)
+            return html;
+        int end = html.indexOf('>', start);
+        if (end < 0)
+            return html;
+
+        String tag = html.substring(start, end)
+                .replaceAll("\\s+data-theme\\s*=\\s*\"[^\"]*\"", "");
+        return html.substring(0, start) + tag + " data-theme=\"" + mode + "\""
+                + html.substring(end);
+    }
+
+    /**
+     * @param key the configuration key
+     * @return true when the value must never be sent back to the page
+     */
+    static boolean isSecretKey(String key)
+    {
+        return "discord.token".equals(key);
     }
 
     private static String renderHocon(String type, Object value)
@@ -603,6 +698,9 @@ public class WebServer
         {
             AudioTrack track = queued.getTrack();
             Map<String, Object> item = new LinkedHashMap<>();
+            // Stable for the life of the track, so the page can keep a row instead of
+            // remounting every row when the queue shifts.
+            item.put("id", Integer.toHexString(System.identityHashCode(queued)));
             item.put("position", position++);
             item.put("title", track.getInfo().title);
             item.put("author", track.getInfo().author);
@@ -627,6 +725,7 @@ public class WebServer
             QueuedTrack queued = handler.getQueue().getHistory().get(i);
             AudioTrack track = queued.getTrack();
             Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", Integer.toHexString(System.identityHashCode(queued)));
             item.put("title", track.getInfo().title);
             item.put("author", track.getInfo().author);
             item.put("durationMs", track.getDuration());
@@ -730,6 +829,12 @@ public class WebServer
         }
 
         byte[] body = Files.readAllBytes(file);
+        if ("index.html".equalsIgnoreCase(file.getFileName().toString()))
+        {
+            // Seed the saved theme before the bundle runs so dark mode does not flash light.
+            body = injectTheme(new String(body, StandardCharsets.UTF_8), readThemeMode())
+                    .getBytes(StandardCharsets.UTF_8);
+        }
         exchange.getResponseHeaders().set("Content-Type", contentType(file));
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
         exchange.sendResponseHeaders(200, body.length);
