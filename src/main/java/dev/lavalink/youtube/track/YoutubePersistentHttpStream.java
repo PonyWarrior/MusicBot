@@ -16,13 +16,17 @@
 package dev.lavalink.youtube.track;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.net.URI;
 import java.util.Arrays;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.sedmelluq.discord.lavaplayer.tools.io.HttpInterface;
@@ -74,6 +78,13 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
      * fetched in the background.
      */
     private static final int PREFETCH_THRESHOLD = 128 * 1024;
+
+    /**
+     * How often a window is requested before the stream gives up, and the pause before the
+     * second attempt (the third waits twice as long).
+     */
+    private static final int FETCH_ATTEMPTS = 3;
+    private static final long RETRY_DELAY_MILLIS = 300;
 
     /**
      * The number of HTTP requests this class has opened, over all instances.
@@ -135,7 +146,33 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
      * The total size of the content, learned from the {@code Content-Range} response header.
      * {@code -1} when still unknown.
      */
-    private long totalLength = -1;
+    private volatile long totalLength = -1;
+
+    /**
+     * The HTTP interface is not thread safe, and both the playback thread and the prefetch
+     * thread fetch windows, so only one of them may be inside a request at a time.
+     */
+    private final Object fetchLock = new Object();
+
+    /**
+     * The request that is on the wire, kept so it can be aborted. Interrupting a thread does
+     * not interrupt blocking socket IO.
+     */
+    private volatile HttpGet inFlight;
+
+    /**
+     * A window that could not be fetched.
+     */
+    private static final class WindowException extends IOException
+    {
+        private final int status;
+
+        private WindowException(String message, int status, Throwable cause)
+        {
+            super(message, cause);
+            this.status = status;
+        }
+    }
 
     /**
      * @param httpInterface The HTTP interface to use for requests
@@ -189,10 +226,20 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
     {
         if (totalLength < 0 && declaredLength < 0 && windowLimit == 0)
         {
-            Chunk chunk = fetchWindow(0);
-            if (chunk != null)
+            try
             {
-                install(chunk);
+                Chunk chunk = fetchWindow(0);
+                // Only keep the window when the stream is still at the start; after a seek it
+                // would move the stream back to offset zero.
+                if (windowStart == 0)
+                {
+                    install(chunk);
+                }
+            }
+            catch (IOException e)
+            {
+                // The length stays unknown; the read that follows reports the failure.
+                LOGGER.debug("Could not learn the stream length: {}", e.getMessage());
             }
         }
 
@@ -333,7 +380,7 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
         }
 
         final long nextStart = windowStart + windowLimit;
-        if (!hasMoreContent())
+        if (!hasMoreContent(nextStart))
         {
             return;
         }
@@ -344,48 +391,133 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
     /**
      * Loads the next window into memory, using the prefetched one when it is ready.
      *
-     * @return true if a window was loaded
+     * <p>A window that cannot be fetched is an error, not the end of the stream. Reporting it
+     * as the end made a track that YouTube stopped serving look like it had simply finished.
+     *
+     * @return true if a window was loaded, false at the end of the content
+     * @throws IOException when the window could not be fetched
      */
     private boolean loadNextWindow() throws IOException
     {
-        Chunk chunk = null;
+        long start = windowStart + windowLimit;
+        Chunk chunk = awaitPrefetch();
 
-        Future<Chunk> pending = prefetched;
-        prefetched = null;
-        if (pending != null)
+        if (chunk == null || chunk.start() != start)
         {
-            try
-            {
-                chunk = pending.get(30, TimeUnit.SECONDS);
-            }
-            catch (Exception e)
-            {
-                chunk = null;
-            }
-        }
-
-        if (chunk == null)
-        {
-            long start = windowStart + windowLimit;
             if (!hasMoreContent(start))
             {
                 return false;
             }
-            chunk = fetchWindow(start);
-            if (chunk == null || chunk.data().length == 0)
+            try
             {
-                return false;
+                chunk = fetchWindowWithRetry(start);
+            }
+            catch (WindowException e)
+            {
+                // Without a known size the end shows up as "range not satisfiable".
+                if (e.status == 416 && getTotalLength() <= 0)
+                {
+                    return false;
+                }
+                throw e;
             }
         }
 
-        window = chunk.data();
-        windowPos = 0;
-        windowLimit = window.length;
-        windowStart = chunk.start();
-        position = windowStart;
+        if (chunk.data().length == 0)
+        {
+            // With a known size an empty window in the middle is a failure. Installing it would
+            // ask for the same window again and again.
+            if (getTotalLength() > 0 && start < getTotalLength())
+            {
+                throw new IOException("YouTube returned no data for the stream window at " + start);
+            }
+            return false;
+        }
 
+        install(chunk);
         maybePrefetch();
         return true;
+    }
+
+    /**
+     * Waits for the window that is being fetched in the background.
+     *
+     * @return the window, or null when there is none or it failed
+     * @throws IOException when the thread was interrupted while waiting
+     */
+    private Chunk awaitPrefetch() throws IOException
+    {
+        Future<Chunk> pending = prefetched;
+        prefetched = null;
+        if (pending == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return pending.get(30, TimeUnit.SECONDS);
+        }
+        catch (InterruptedException e)
+        {
+            // The player interrupts this thread to seek or stop. Swallowing that would turn a
+            // stop into one more network request.
+            pending.cancel(true);
+            abortRequest();
+            Thread.currentThread().interrupt();
+            throw new InterruptedIOException("Interrupted while waiting for stream data");
+        }
+        catch (TimeoutException e)
+        {
+            // Give up on the background request before fetching the window here; fetchWindow
+            // waits for it to let go of the connection.
+            pending.cancel(true);
+            abortRequest();
+            return null;
+        }
+        catch (ExecutionException | CancellationException e)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * Fetches a window, trying again when the failure looks temporary.
+     */
+    private Chunk fetchWindowWithRetry(long start) throws IOException
+    {
+        WindowException last = null;
+        for (int attempt = 0; attempt < FETCH_ATTEMPTS; attempt++)
+        {
+            if (attempt > 0)
+            {
+                try
+                {
+                    Thread.sleep(RETRY_DELAY_MILLIS * attempt);
+                }
+                catch (InterruptedException e)
+                {
+                    Thread.currentThread().interrupt();
+                    throw new InterruptedIOException("Interrupted while retrying a stream window");
+                }
+            }
+            try
+            {
+                return fetchWindow(start);
+            }
+            catch (WindowException e)
+            {
+                last = e;
+                // A refusal (403: the stream url expired, 404, 416) will not change on a retry.
+                if (e.status >= 400 && e.status < 500 && e.status != 429)
+                {
+                    break;
+                }
+                LOGGER.debug("Stream window at {} failed (attempt {}): {}", start, attempt + 1, e.getMessage());
+            }
+        }
+        LOGGER.warn("Giving up on the stream window at {}: {}", start, last.getMessage());
+        throw last;
     }
 
     /**
@@ -404,9 +536,10 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
      * Fetches a single window.
      *
      * @param start the file offset to start at
-     * @return the window, or null when the request failed
+     * @return the window
+     * @throws IOException when the request failed or was refused
      */
-    private Chunk fetchWindow(long start)
+    private Chunk fetchWindow(long start) throws IOException
     {
         long end = start + WINDOW_SIZE - 1;
         long total = getTotalLength();
@@ -415,38 +548,78 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
             end = total - 1;
         }
 
-        long started = System.nanoTime();
-        try
+        HttpGet request = new HttpGet(contentUrl);
+        request.setHeader(HttpHeaders.RANGE, "bytes=" + start + "-" + end);
+
+        synchronized (fetchLock)
         {
-            HttpGet request = new HttpGet(contentUrl);
-            request.setHeader(HttpHeaders.RANGE, "bytes=" + start + "-" + end);
-
-            REQUESTS.incrementAndGet();
-            requestCounter.incrementAndGet();
-
-            try (CloseableHttpResponse response = httpInterface.execute(request))
+            inFlight = request;
+            // A cancelled prefetch must not start a request nobody is waiting for. This is
+            // checked after the request became abortable, so a cancellation cannot slip between.
+            if (Thread.currentThread().isInterrupted())
             {
-                int status = response.getStatusLine().getStatusCode();
-                if (status != 200 && status != 206)
+                inFlight = null;
+                throw new InterruptedIOException("Interrupted before fetching a stream window");
+            }
+
+            long started = System.nanoTime();
+            try
+            {
+                REQUESTS.incrementAndGet();
+                requestCounter.incrementAndGet();
+
+                try (CloseableHttpResponse response = httpInterface.execute(request))
                 {
-                    LOGGER.debug("Stream window {}..{} rejected with status {}", start, end, status);
-                    return null;
+                    int status = response.getStatusLine().getStatusCode();
+                    // 200 means the server ignored the range and is sending the whole file, which
+                    // is only the requested window when the window starts at zero.
+                    if (status != 206 && !(status == 200 && start == 0))
+                    {
+                        throw new WindowException("YouTube answered the stream window " + start + ".." + end
+                                + " with HTTP " + status, status, null);
+                    }
+
+                    byte[] data = response.getEntity() == null
+                            ? new byte[0]
+                            : response.getEntity().getContent().readNBytes((int) WINDOW_SIZE);
+
+                    learnTotalLength(response);
+                    if (status == 200 && totalLength < 0 && response.getEntity() != null
+                            && response.getEntity().getContentLength() > 0)
+                    {
+                        // The whole file was sent, so its length is the total.
+                        totalLength = response.getEntity().getContentLength();
+                    }
+                    LOGGER.debug("Stream window {}..{} fetched in {} ms ({} bytes)",
+                            start, end, (System.nanoTime() - started) / 1_000_000, data.length);
+                    return new Chunk(start, data);
                 }
-
-                byte[] data = response.getEntity() == null
-                        ? new byte[0]
-                        : response.getEntity().getContent().readAllBytes();
-
-                learnTotalLength(response);
-                LOGGER.debug("Stream window {}..{} fetched in {} ms ({} bytes)",
-                        start, end, (System.nanoTime() - started) / 1_000_000, data.length);
-                return new Chunk(start, data);
+            }
+            catch (WindowException e)
+            {
+                throw e;
+            }
+            catch (IOException | RuntimeException e)
+            {
+                // Includes timeouts and an aborted request.
+                throw new WindowException("The stream window " + start + ".." + end + " failed: " + e, 0, e);
+            }
+            finally
+            {
+                inFlight = null;
             }
         }
-        catch (Exception e)
+    }
+
+    /**
+     * Aborts the request that is on the wire, if any, so its thread lets go of the connection.
+     */
+    private void abortRequest()
+    {
+        HttpGet request = inFlight;
+        if (request != null)
         {
-            LOGGER.debug("Stream window {}..{} failed: {}", start, end, e.toString());
-            return null;
+            request.abort();
         }
     }
 
@@ -488,14 +661,6 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
     }
 
     /**
-     * @return true if there is still content left to read
-     */
-    private boolean hasMoreContent()
-    {
-        return hasMoreContent(windowStart);
-    }
-
-    /**
      * @param start the file offset to check
      * @return true if there is still content left to read from that offset
      */
@@ -515,6 +680,7 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
         if (pending != null)
         {
             pending.cancel(true);
+            abortRequest();
         }
     }
 
@@ -527,16 +693,18 @@ public class YoutubePersistentHttpStream extends PersistentHttpStream
     @Override
     public int checkStatusCode() throws IOException
     {
-        Chunk chunk = fetchWindow(0);
-        if (chunk == null)
+        Chunk chunk;
+        try
         {
-            return 0;
+            chunk = fetchWindow(0);
         }
-        window = chunk.data();
-        windowPos = 0;
-        windowLimit = window.length;
-        windowStart = chunk.start();
-        position = windowStart;
+        catch (WindowException e)
+        {
+            // The caller decides from the status whether the stream url has expired.
+            LOGGER.debug("Stream check failed: {}", e.getMessage());
+            return e.status;
+        }
+        install(chunk);
         maybePrefetch();
         return 200;
     }
