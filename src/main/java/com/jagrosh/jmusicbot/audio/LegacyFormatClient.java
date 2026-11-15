@@ -16,6 +16,7 @@
 package com.jagrosh.jmusicbot.audio;
 
 import com.sedmelluq.discord.lavaplayer.tools.JsonBrowser;
+import com.sedmelluq.discord.lavaplayer.tools.Units;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 
 import dev.lavalink.youtube.YoutubeAudioSourceManager;
@@ -126,20 +127,42 @@ public class LegacyFormatClient extends MWebWithThumbnail
                                                   boolean validatePlayabilityStatus)
             throws dev.lavalink.youtube.CannotBeLoaded, java.io.IOException
     {
-        String key = videoId + "|" + status + "|" + validatePlayabilityStatus;
-
-        JsonBrowser cached = responseCache.get(key);
+        // The metadata request and the formats request differ in the last two arguments, so
+        // they must not be part of the key or the second request never finds the first one.
+        JsonBrowser cached = responseCache.get(videoId);
         if (cached != null)
         {
             return cached;
         }
 
-        JsonBrowser json = super.loadTrackInfoFromInnertube(source, httpInterface, videoId, status,
-                validatePlayabilityStatus);
+        JsonBrowser json = fetchTrackInfo(source, httpInterface, videoId, status, validatePlayabilityStatus);
 
-        responseCache.put(key, json);
+        // Only a playable response is the same answer for every caller.
+        if (isPlayable(json))
+        {
+            responseCache.put(videoId, json);
+        }
 
         return json;
+    }
+
+    /**
+     * Asks the player API. Separate from the cache so the cache can be tested without a network.
+     */
+    protected JsonBrowser fetchTrackInfo(YoutubeAudioSourceManager source,
+                                         com.sedmelluq.discord.lavaplayer.tools.io.HttpInterface httpInterface,
+                                         String videoId,
+                                         Client.PlayabilityStatus status,
+                                         boolean validatePlayabilityStatus)
+            throws dev.lavalink.youtube.CannotBeLoaded, java.io.IOException
+    {
+        return super.loadTrackInfoFromInnertube(source, httpInterface, videoId, status,
+                validatePlayabilityStatus);
+    }
+
+    private static boolean isPlayable(JsonBrowser json)
+    {
+        return json != null && "OK".equals(json.get("playabilityStatus").get("status").text());
     }
 
     /**
@@ -168,14 +191,14 @@ public class LegacyFormatClient extends MWebWithThumbnail
      * headers, so it reported a duration of {@code 0} and a position of {@code 0}, which left the
      * "now playing" widget blank ({@code 00:00 / 00:00}).
      *
-     * <p>Only videos with a known duration are switched over; a live stream (duration {@code 0})
-     * keeps the segmented path it needs.
+     * <p>Only videos with a known duration are switched over; a live stream (reported with an
+     * unknown duration) keeps the segmented path it needs.
      */
     @Override
     public AudioTrack buildAudioTrack(YoutubeAudioSourceManager source, JsonBrowser json, String title,
             String author, long duration, String videoId, boolean isStream)
     {
-        if (isStream && duration > 0)
+        if (isStream && duration > 0 && duration != Units.DURATION_MS_UNKNOWN)
         {
             isStream = false;
         }

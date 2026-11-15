@@ -89,6 +89,12 @@ public class LocalCipherService
                 // The stale service is gone, fall through and start our own.
                 waitForPortClosed(10);
             }
+            else if (isPortHeldByAnotherProgram())
+            {
+                LOG.error("Port {} is used by another program, so the local cipher service cannot start. "
+                        + "Close that program or change playback.youtube.localCipher.port.", port);
+                return false;
+            }
             else
             {
                 LOG.info("Local cipher service is already listening on port {}, reusing it", port);
@@ -199,8 +205,10 @@ public class LocalCipherService
         }
         process = null;
 
+        // Listed first: once the parent is gone its children can no longer be found through it.
+        List<ProcessHandle> children = p.descendants().toList();
         p.destroy();
-        p.descendants().forEach(ProcessHandle::destroy);
+        children.forEach(ProcessHandle::destroy);
         try
         {
             if (!p.waitFor(5, TimeUnit.SECONDS))
@@ -262,7 +270,9 @@ public class LocalCipherService
 
             Optional<ProcessHandle> parent = handle.get().parent();
             boolean orphaned = parent.isEmpty() || ProcessHandle.of(parent.get().pid()).isEmpty();
-            if (orphaned)
+            // Many unrelated programs have no living parent. Only a process running the
+            // configured command is ours to stop.
+            if (orphaned && isOurProgram(handle.get()))
             {
                 LOG.warn("Found an orphaned local cipher service (pid {}), stopping it", pid);
                 handle.get().destroy();
@@ -278,6 +288,53 @@ public class LocalCipherService
             }
         }
         return false;
+    }
+
+    /**
+     * @return true when the port is held by a process that is known not to be the service
+     */
+    private boolean isPortHeldByAnotherProgram()
+    {
+        for (int pid : findPortOwners())
+        {
+            Optional<String> running = ProcessHandle.of(pid).flatMap(handle -> handle.info().command());
+            if (running.isPresent() && !command.isEmpty() && !sameProgram(running.get(), command.get(0)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isOurProgram(ProcessHandle handle)
+    {
+        Optional<String> running = handle.info().command();
+        return running.isPresent() && !command.isEmpty() && sameProgram(running.get(), command.get(0));
+    }
+
+    /**
+     * Compares the executable of a running process with the configured command by file name,
+     * ignoring the folder, the case and a {@code .exe} suffix.
+     *
+     * @param runningCommand the executable path reported for a process
+     * @param configuredCommand the first element of the configured command
+     * @return true when both name the same program
+     */
+    public static boolean sameProgram(String runningCommand, String configuredCommand)
+    {
+        if (runningCommand == null || configuredCommand == null)
+        {
+            return false;
+        }
+        String running = programName(runningCommand);
+        return !running.isEmpty() && running.equals(programName(configuredCommand));
+    }
+
+    private static String programName(String command)
+    {
+        String name = command.trim().replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1).toLowerCase(java.util.Locale.ROOT);
+        return name.endsWith(".exe") ? name.substring(0, name.length() - 4) : name;
     }
 
     /**
@@ -392,7 +449,8 @@ public class LocalCipherService
             }
             try
             {
-                if (Files.isRegularFile(Paths.get(dir, windows ? exe + ".exe" : exe)))
+                if (Files.isRegularFile(Paths.get(dir, exe))
+                        || (windows && Files.isRegularFile(Paths.get(dir, exe + ".exe"))))
                 {
                     return true;
                 }
