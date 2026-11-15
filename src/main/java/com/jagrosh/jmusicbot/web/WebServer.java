@@ -84,13 +84,11 @@ public class WebServer
     public WebServer(Bot bot)
     {
         this.bot = bot;
-        Path web = OtherUtil.getPath("web");
+        // A source checkout serves the build output directly, so a forgotten copy in web/ can
+        // never shadow a newer build. A packaged bot has no webui/ and serves web/.
+        Path web = OtherUtil.getPath("webui/dist");
         if (!Files.isDirectory(web))
-        {
-            Path dev = OtherUtil.getPath("webui/dist");
-            if (Files.isDirectory(dev))
-                web = dev;
-        }
+            web = OtherUtil.getPath("web");
         this.webRoot = web.toAbsolutePath().normalize();
     }
 
@@ -676,6 +674,7 @@ public class WebServer
             return;
         }
 
+        Reply reply = new Reply();
         try
         {
             switch (action)
@@ -701,11 +700,20 @@ public class WebServer
                 }
                 case "shuffle" -> handler.getQueue().shuffle(0);
                 case "repeat" -> cycleRepeat(guild);
-                case "favorite" -> bot.getMusicService().toggleCurrentTrackFavorite(guild, guiMember(guild), NOOP);
-                case "previous" -> bot.getMusicService().previous(guild, guiMember(guild), NOOP);
+                case "favorite" -> bot.getMusicService().toggleCurrentTrackFavorite(guild, guiMember(guild), reply);
+                case "previous" -> bot.getMusicService().previous(guild, guiMember(guild), reply);
                 default -> throw new IllegalArgumentException("unknown action: " + action);
             }
-            sendJson(exchange, 200, Map.of("ok", true));
+            if (reply.error != null)
+            {
+                sendJson(exchange, 409, Map.of("ok", false, "error", reply.error));
+                return;
+            }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("ok", true);
+            if (reply.message != null)
+                result.put("message", reply.message);
+            sendJson(exchange, 200, result);
         }
         catch (Exception e)
         {
@@ -986,15 +994,48 @@ public class WebServer
         }
     }
 
-    private static final MusicService.OutputAdapter NOOP = new MusicService.OutputAdapter()
+    /**
+     * Collects what a service call would have answered in Discord, so the page can show it
+     * instead of reporting every button press as a success.
+     *
+     * <p>Answers that arrive after the request was answered (a download that fails a minute
+     * later) cannot reach the page any more, so errors are also written to the log, which the
+     * page displays.
+     */
+    private static final class Reply implements MusicService.OutputAdapter
     {
-        @Override public void replySuccess(String content) { }
-        @Override public void replyError(String content) { }
-        @Override public void replyWarning(String content) { }
+        private volatile String error;
+        private volatile String message;
+
+        @Override
+        public void replySuccess(String content)
+        {
+            message = plain(content);
+        }
+
+        @Override
+        public void replyError(String content)
+        {
+            error = plain(content);
+            LOG.warn("Web GUI action failed: {}", error);
+        }
+
+        @Override
+        public void replyWarning(String content)
+        {
+            message = plain(content);
+        }
+
         @Override public void editMessage(String content) { }
         @Override public void editMessage(String content, Consumer<Message> onSuccess) { }
         @Override public void editNowPlaying(AudioHandler handler) { }
         @Override public void editNoMusic(AudioHandler handler) { }
         @Override public void onShowHelp() { }
-    };
+
+        /** Drops the Discord markdown the service messages are written with. */
+        private static String plain(String content)
+        {
+            return content == null ? "" : content.replace("**", "").replace("`", "");
+        }
+    }
 }

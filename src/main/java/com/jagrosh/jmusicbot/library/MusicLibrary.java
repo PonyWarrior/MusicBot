@@ -221,6 +221,7 @@ public class MusicLibrary
      */
     public void recordDownload(Path file)
     {
+        refresh();
         if(!contains(file))
             return;
         synchronized(downloadsLock)
@@ -237,6 +238,7 @@ public class MusicLibrary
      */
     public void forgetDownload(Path file)
     {
+        refresh();
         if(file == null)
             return;
         synchronized(downloadsLock)
@@ -405,6 +407,22 @@ public class MusicLibrary
         return Files.isRegularFile(sidecar) ? sidecar : null;
     }
 
+    private static final long LISTING_LIFETIME_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+
+    private record Listing(List<Path> tracks, long takenAt)
+    {
+    }
+
+    private volatile Listing listing;
+
+    /**
+     * Forgets the cached folder listing. Call it after adding or removing a library file.
+     */
+    public void refresh()
+    {
+        listing = null;
+    }
+
     /**
      * @return true if the library holds at least one track
      */
@@ -418,16 +436,25 @@ public class MusicLibrary
      */
     public List<Path> listTracks()
     {
+        // The web GUI asks for the track count every second and one search lists the folder
+        // three times, so the walk is reused for a moment. Files the bot adds or removes drop
+        // the listing at once; a file copied in by hand shows up when the listing expires.
+        Listing cached = listing;
+        if (cached != null && System.nanoTime() - cached.takenAt() < LISTING_LIFETIME_NANOS)
+            return cached.tracks();
+
         if (!Files.isDirectory(folder))
         {
             return List.of();
         }
         try (Stream<Path> files = Files.walk(folder))
         {
-            return files.filter(Files::isRegularFile)
+            List<Path> tracks = files.filter(Files::isRegularFile)
                     .filter(this::isAudioFile)
                     .sorted(Comparator.comparing(p -> p.getFileName().toString().toLowerCase(Locale.ROOT)))
                     .toList();
+            listing = new Listing(tracks, System.nanoTime());
+            return tracks;
         }
         catch (IOException | java.io.UncheckedIOException e)
         {

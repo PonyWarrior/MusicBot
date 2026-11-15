@@ -34,6 +34,30 @@ class MusicLibraryDeletionTest
     Path tempDir;
 
     @Test
+    @DisplayName("the folder listing is reused until the bot adds or removes a file")
+    void listingIsReusedUntilTheLibraryChanges() throws IOException
+    {
+        MusicLibrary library = new MusicLibrary(tempDir);
+        Path first = Files.writeString(tempDir.resolve("first.flac"), "audio");
+        assertEquals(1, library.listTracks().size());
+
+        // Copied in behind the bot's back: seen once the short-lived listing expires.
+        Path second = Files.writeString(tempDir.resolve("second.flac"), "audio");
+        assertEquals(1, library.listTracks().size());
+        library.refresh();
+        assertEquals(2, library.listTracks().size());
+
+        // The bot's own changes are visible at once.
+        Path third = Files.writeString(tempDir.resolve("third.flac"), "audio");
+        library.recordDownload(third);
+        assertEquals(3, library.listTracks().size());
+
+        Files.delete(first);
+        library.forgetDownload(first);
+        assertEquals(java.util.List.of(second, third), library.listTracks());
+    }
+
+    @Test
     @DisplayName("a scheduled file and its sidecar are deleted")
     void scheduledFileIsDeleted() throws IOException
     {
