@@ -506,12 +506,13 @@
                                     which YouTube now answers with HTTP 403.
                                 -->
                                 <filter>
-                                    <artifact>dev.lavalink.youtube:v2</artifact>
+                                    <!-- The class ships in the "common" artifact, not in "v2". -->
+                                    <artifact>dev.lavalink.youtube:common</artifact>
                                     <includes>
                                         <include>**</include>
                                     </includes>
                                     <excludes>
-                                        <exclude>dev/lavalink/youtube/track/YoutubePersistentHttpStream.class</exclude>
+                                        <exclude>dev/lavalink/youtube/track/YoutubePersistentHttpStream*.class</exclude>
                                     </excludes>
                                 </filter>
                                 <!-- Keep classes that may be loaded via reflection -->
@@ -864,6 +865,16 @@
                                             <includes>
                                                 <include>**</include>
                                             </includes>
+                                        </filter>
+                                        <!-- Use this project's patched YouTube stream, as the default build does -->
+                                        <filter>
+                                            <artifact>dev.lavalink.youtube:common</artifact>
+                                            <includes>
+                                                <include>**</include>
+                                            </includes>
+                                            <excludes>
+                                                <exclude>dev/lavalink/youtube/track/YoutubePersistentHttpStream*.class</exclude>
+                                            </excludes>
                                         </filter>
                                         <!-- Keep classes that may be loaded via reflection -->
                                         <filter>
