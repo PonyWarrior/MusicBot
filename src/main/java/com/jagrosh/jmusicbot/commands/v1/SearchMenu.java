@@ -1,18 +1,3 @@
-/*
- * Copyright 2026 Arif Banai (arif-banai)
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 package com.jagrosh.jmusicbot.commands.v1;
 
 import com.jagrosh.jdautilities.commons.waiter.EventWaiter;
@@ -45,8 +30,6 @@ import java.util.function.IntConsumer;
  * <p>{@link OrderedMenu} puts all the choices in the description of a single embed, which leaves
  * room for only one thumbnail. A message can hold up to ten embeds, so this menu sends one embed
  * per result and lets the user pick with a number reaction or by typing the number.
- *
- * @author Arif Banai (arif-banai)
  */
 public final class SearchMenu
 {
