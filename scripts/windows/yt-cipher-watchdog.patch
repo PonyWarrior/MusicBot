@@ -1,0 +1,33 @@
+diff --git a/server.ts b/server.ts
+index 80e3edf..2212d29 100644
+--- a/server.ts
++++ b/server.ts
+@@ -10,6 +10,28 @@ import { withValidation } from "./src/validation.ts";
+ import { registry } from "./src/metrics.ts";
+ import type { ApiRequest, RequestContext } from "./src/types.ts";
+ 
++// The bot starts this service with a pipe on stdin and keeps the write end open. If the bot
++// dies, even when it is force-killed and its shutdown hook cannot run, the pipe closes and this
++// read returns null, so the service exits instead of being left behind as an orphan.
++// When the service is started by hand from a terminal, stdin is a terminal and this is skipped.
++try {
++    if (!Deno.stdin.isTerminal()) {
++        (async () => {
++            const buffer = new Uint8Array(1);
++            try {
++                while (await Deno.stdin.read(buffer) !== null) {
++                    // Only the end of the pipe matters.
++                }
++            } catch {
++                // A closed stdin means the parent is gone too.
++            }
++            Deno.exit(0);
++        })();
++    }
++} catch {
++    // No usable stdin; leave the watchdog disabled.
++}
++
+ const API_TOKEN = Deno.env.get("API_TOKEN");
+ 
+ async function baseHandler(req: Request): Promise<Response> {

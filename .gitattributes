@@ -8,6 +8,9 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
+# Patches are applied with git, which wants them byte for byte
+*.patch text eol=lf
+
 # Docker files should use LF
 Dockerfile text eol=lf
 .dockerignore text eol=lf

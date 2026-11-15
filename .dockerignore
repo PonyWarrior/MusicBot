@@ -42,6 +42,9 @@ serversettings.json
 Playlists/
 playlists/
 
+# Desktop web UI (the image runs headless)
+webui/
+
 # Scripts (not needed in image, except entrypoint)
 scripts/
 *.sh

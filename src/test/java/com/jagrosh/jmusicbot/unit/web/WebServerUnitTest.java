@@ -19,7 +19,11 @@ import com.jagrosh.jmusicbot.web.WebServer;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -168,6 +172,37 @@ class WebServerUnitTest
     {
         assertEquals(CONFIG, apply("discord.token", ""));
         assertEquals(CONFIG, apply("discord.token", "   "));
+    }
+
+    @Test
+    void aCheckoutServesItsBuildOutputBeforeAnOldCopy(@TempDir Path work) throws IOException
+    {
+        Files.createDirectories(work.resolve("web"));
+        Files.createDirectories(work.resolve("webui/dist"));
+        assertEquals(work.resolve("webui/dist"), WebServer.resolveWebRoot(work, null));
+    }
+
+    @Test
+    void aPackageServesItsWebFolder(@TempDir Path work) throws IOException
+    {
+        Files.createDirectories(work.resolve("web"));
+        assertEquals(work.resolve("web"), WebServer.resolveWebRoot(work, work));
+    }
+
+    @Test
+    void aJarInTargetFindsTheBuildOfItsCheckout(@TempDir Path root) throws IOException
+    {
+        Path work = Files.createDirectories(root.resolve("elsewhere"));
+        Path target = Files.createDirectories(root.resolve("clone/target"));
+        Files.createDirectories(root.resolve("clone/webui/dist"));
+        assertEquals(root.resolve("clone/webui/dist"), WebServer.resolveWebRoot(work, target));
+    }
+
+    @Test
+    void aMissingWebUiFallsBackToTheWebFolderOfTheWorkingDirectory(@TempDir Path work)
+    {
+        assertEquals(work.resolve("web"), WebServer.resolveWebRoot(work, null));
+        assertEquals(work.resolve("web"), WebServer.resolveWebRoot(work, work.resolve("target")));
     }
 
     private static int count(String text, String needle)

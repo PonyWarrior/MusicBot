@@ -65,9 +65,9 @@ import java.util.function.Consumer;
 /**
  * A small local HTTP server for the web GUI.
  *
- * <p>It serves the built React application from {@code web/} (or {@code webui/dist} during
- * development) and a JSON API under {@code /api}. It binds to 127.0.0.1 only, so it is not
- * reachable from the network.
+ * <p>It serves the built React application from {@code webui/dist} (a source checkout) or
+ * {@code web/} (a package) and a JSON API under {@code /api}. It binds to 127.0.0.1 only, so
+ * it is not reachable from the network.
  *
  * @author Arif Banai (arif-banai)
  */
@@ -84,12 +84,54 @@ public class WebServer
     public WebServer(Bot bot)
     {
         this.bot = bot;
-        // A source checkout serves the build output directly, so a forgotten copy in web/ can
-        // never shadow a newer build. A packaged bot has no webui/ and serves web/.
-        Path web = OtherUtil.getPath("webui/dist");
-        if (!Files.isDirectory(web))
-            web = OtherUtil.getPath("web");
-        this.webRoot = web.toAbsolutePath().normalize();
+        this.webRoot = resolveWebRoot(OtherUtil.getPath("."), codeDirectory());
+    }
+
+    /**
+     * Picks the folder the web UI is served from.
+     *
+     * <p>A source checkout serves the build output directly, so a forgotten copy in
+     * {@code web/} can never shadow a newer build. A packaged bot has no {@code webui/} and
+     * serves {@code web/}. A jar started from {@code target/} with another working directory
+     * still finds the build of the checkout it belongs to.
+     *
+     * @param workingDirectory the directory the bot was started in
+     * @param codeDirectory the directory holding the jar or classes, may be null
+     * @return the first candidate that exists, or {@code web/} in the working directory
+     */
+    public static Path resolveWebRoot(Path workingDirectory, Path codeDirectory)
+    {
+        List<Path> candidates = new ArrayList<>();
+        candidates.add(workingDirectory.resolve("webui/dist"));
+        candidates.add(workingDirectory.resolve("web"));
+        if (codeDirectory != null)
+        {
+            candidates.add(codeDirectory.resolve("web"));
+            if (codeDirectory.getParent() != null)
+                candidates.add(codeDirectory.getParent().resolve("webui/dist"));
+        }
+
+        for (Path candidate : candidates)
+            if (Files.isDirectory(candidate))
+                return candidate.toAbsolutePath().normalize();
+        return candidates.get(1).toAbsolutePath().normalize();
+    }
+
+    /**
+     * @return the directory that holds the running jar (or classes), or null when unknown
+     */
+    private static Path codeDirectory()
+    {
+        try
+        {
+            Path location = Path.of(JMusicBot.class.getProtectionDomain().getCodeSource()
+                    .getLocation().toURI());
+            return Files.isDirectory(location) ? location : location.getParent();
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
     }
 
     /**
@@ -424,15 +466,7 @@ public class WebServer
     private static Path findLauncher()
     {
         List<Path> directories = new ArrayList<>();
-        try
-        {
-            Path location = Path.of(JMusicBot.class.getProtectionDomain().getCodeSource()
-                    .getLocation().toURI());
-            directories.add(Files.isDirectory(location) ? location : location.getParent());
-        }
-        catch (Exception ignored)
-        {
-        }
+        directories.add(codeDirectory());
         directories.add(Path.of(".").toAbsolutePath().normalize());
 
         for (Path directory : directories)

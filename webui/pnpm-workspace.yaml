@@ -1,0 +1,10 @@
+minimumReleaseAgeExclude:
+  - '@astryxdesign/core@0.7.14'
+  - '@astryxdesign/theme-neutral@0.7.14'
+  - vite@8.3.8
+
+# Its postinstall script only prints a setup hint; nothing in the build needs it.
+allowBuilds:
+  '@astryxdesign/core': false
+
+verifyDepsBeforeRun: false

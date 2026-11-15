@@ -28,3 +28,20 @@ Thumbs.db
 
 # Runtime logs (may contain the bot token at trace/all level)
 /logs/
+
+# Web UI: sources and lockfile are tracked, dependencies and build output are not
+/webui/node_modules/
+/webui/dist/
+!/webui/*.json
+!/webui/pnpm-lock.yaml
+
+# Files copied into the Windows package
+!/scripts/windows/package/*.txt
+
+# Local Windows package and the tools set up by scripts/windows
+/dist/
+/cipher/
+/ytdlp/
+/javafx/
+/web/
+/Music/
