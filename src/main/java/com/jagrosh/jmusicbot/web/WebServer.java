@@ -478,7 +478,7 @@ public class WebServer
      * @param mode {@code "light"}, {@code "dark"} or null to leave the file untouched
      * @return the contents with {@code data-theme} set on the root element
      */
-    static String injectTheme(String html, String mode)
+    public static String injectTheme(String html, String mode)
     {
         if (mode == null || (!mode.equals("light") && !mode.equals("dark")))
             return html;
@@ -500,7 +500,7 @@ public class WebServer
      * @param key the configuration key
      * @return true when the value must never be sent back to the page
      */
-    static boolean isSecretKey(String key)
+    public static boolean isSecretKey(String key)
     {
         return "discord.token".equals(key);
     }
