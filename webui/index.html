@@ -4,21 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JMusicBot</title>
-    <script>
-      // Runs before the bundle and before the first paint. The server has already written the
-      // saved theme into <html data-theme>; on a first run this follows the OS instead.
-      (function () {
-        var root = document.documentElement;
-        if (!root.getAttribute('data-theme')) {
-          root.setAttribute(
-            'data-theme',
-            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-              ? 'dark'
-              : 'light',
-          );
-        }
-      })();
-    </script>
+    <script src="/theme.js"></script>
   </head>
   <body>
     <div id="root"></div>

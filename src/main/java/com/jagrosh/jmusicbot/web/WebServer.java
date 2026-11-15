@@ -8,6 +8,7 @@ import com.jagrosh.jmusicbot.audio.AudioHandler;
 import com.jagrosh.jmusicbot.audio.QueuedTrack;
 import com.jagrosh.jmusicbot.audio.RequestMetadata;
 import com.jagrosh.jmusicbot.config.io.ConfigIO;
+import com.jagrosh.jmusicbot.config.model.ConfigOption;
 import com.jagrosh.jmusicbot.service.MusicService;
 import com.jagrosh.jmusicbot.settings.RepeatMode;
 import com.jagrosh.jmusicbot.settings.Settings;
@@ -25,11 +26,13 @@ import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Message;
+import com.sedmelluq.discord.lavaplayer.tools.Units;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.management.ManagementFactory;
 import java.math.BigDecimal;
@@ -50,54 +53,91 @@ import java.util.function.Consumer;
 /**
  * A small local HTTP server for the web GUI.
  *
- * <p>It serves the built React application from {@code webui/dist} (a source checkout) or
- * {@code web/} (a package) and a JSON API under {@code /api}. It binds to 127.0.0.1 only, so
- * it is not reachable from the network.
+ * <p>It serves the built React application, from {@code webui/dist} in a source checkout and
+ * otherwise from the copy inside the jar, and a JSON API under {@code /api}. It binds to
+ * 127.0.0.1 only, so it is not reachable from the network.
  */
 public class WebServer
 {
     private static final Logger LOG = LoggerFactory.getLogger(WebServer.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /** Where the build puts the web UI inside the jar. */
+    private static final String EMBEDDED_ROOT = "/web/";
+
+    /**
+     * The page loads nothing but its own files, images (avatars and artwork come from other
+     * hosts) and its own API. Astryx injects style elements at run time, so inline styles stay
+     * allowed; scripts do not.
+     */
+    private static final String CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; "
+            + "style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; "
+            + "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; "
+            + "frame-ancestors 'none'";
+
+    /** The settings that only accept one of a few words, with the words the bot understands. */
+    private static final Map<String, List<String>> CHOICES = Map.of(
+            "logging.level", List.of("off", "error", "warn", "info", "debug", "trace", "all"),
+            "gui.mode", List.of("web", "swing"),
+            "gui.theme", List.of("light", "dark", "darcula", "intellij"),
+            "performance.resamplingQuality", List.of("low", "medium", "high"),
+            "presence.status", List.of("ONLINE", "IDLE", "DND", "INVISIBLE"));
+
     private final Bot bot;
+    /** The folder the web UI is served from, or null when it comes from the jar (or is missing). */
     private final Path webRoot;
+    private final boolean embedded;
     private HttpServer server;
     private int port;
 
     public WebServer(Bot bot)
     {
         this.bot = bot;
-        this.webRoot = resolveWebRoot(OtherUtil.getPath("."), codeDirectory());
+        boolean inJar = WebServer.class.getResource(EMBEDDED_ROOT + "index.html") != null;
+        this.webRoot = resolveWebRoot(OtherUtil.getPath("."), codeDirectory(), inJar);
+        this.embedded = webRoot == null && inJar;
     }
 
     /**
      * Picks the folder the web UI is served from.
      *
-     * <p>A source checkout serves the build output directly, so a forgotten copy in
-     * {@code web/} can never shadow a newer build. A packaged bot has no {@code webui/} and
-     * serves {@code web/}. A jar started from {@code target/} with another working directory
-     * still finds the build of the checkout it belongs to.
+     * <p>A source checkout serves its build output directly, so the page being worked on is the
+     * page that is shown; a jar started from {@code target/} with another working directory
+     * still finds the build of the checkout it belongs to. Otherwise the copy inside the jar
+     * is used, which always matches the server. A {@code web/} folder is only a fallback for a
+     * jar built without the web UI: served first, a folder left behind by an older package
+     * would show an old page against a new server.
      *
      * @param workingDirectory the directory the bot was started in
      * @param codeDirectory the directory holding the jar or classes, may be null
-     * @return the first candidate that exists, or {@code web/} in the working directory
+     * @param embedded whether the jar contains the web UI
+     * @return the folder to serve, or null to serve the copy in the jar (or nothing at all)
      */
-    public static Path resolveWebRoot(Path workingDirectory, Path codeDirectory)
+    public static Path resolveWebRoot(Path workingDirectory, Path codeDirectory, boolean embedded)
     {
         List<Path> candidates = new ArrayList<>();
         candidates.add(workingDirectory.resolve("webui/dist"));
-        candidates.add(workingDirectory.resolve("web"));
-        if (codeDirectory != null)
+        if (codeDirectory != null && codeDirectory.getParent() != null)
+            candidates.add(codeDirectory.getParent().resolve("webui/dist"));
+        if (!embedded)
         {
-            candidates.add(codeDirectory.resolve("web"));
-            if (codeDirectory.getParent() != null)
-                candidates.add(codeDirectory.getParent().resolve("webui/dist"));
+            candidates.add(workingDirectory.resolve("web"));
+            if (codeDirectory != null)
+                candidates.add(codeDirectory.resolve("web"));
         }
 
         for (Path candidate : candidates)
-            if (Files.isDirectory(candidate))
+            if (Files.isRegularFile(candidate.resolve("index.html")))
                 return candidate.toAbsolutePath().normalize();
-        return candidates.get(1).toAbsolutePath().normalize();
+        return null;
+    }
+
+    /**
+     * @return true when there is a page to show; without one the window would only show an error
+     */
+    public boolean hasWebUi()
+    {
+        return webRoot != null || embedded;
     }
 
     /**
@@ -142,7 +182,8 @@ public class WebServer
             }));
             server.start();
             port = server.getAddress().getPort();
-            LOG.info("Web GUI listening on http://127.0.0.1:{} (serving {})", port, webRoot);
+            LOG.info("Web GUI listening on http://127.0.0.1:{} (serving {})", port,
+                    webRoot != null ? webRoot : embedded ? "the copy in the jar" : "nothing: no web UI found");
             return port;
         }
         catch (IOException e)
@@ -178,6 +219,12 @@ public class WebServer
     {
         return exchange ->
         {
+            // On every answer, errors included: the page must never run a script it did not
+            // ship, be framed by another page, or have a file read as something it is not.
+            exchange.getResponseHeaders().set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+            exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+            exchange.getResponseHeaders().set("X-Frame-Options", "DENY");
+            exchange.getResponseHeaders().set("Referrer-Policy", "no-referrer");
             if (!isLocalRequest(exchange))
             {
                 sendJson(exchange, 403, Map.of("error", "forbidden"));
@@ -275,59 +322,8 @@ public class WebServer
             }
 
             Config config = ConfigFactory.parseFile(path.toFile()).resolve();
-            Config defaults = loadDefaults();
-            List<Map<String, Object>> entries = new ArrayList<>();
-            for (Map.Entry<String, ConfigValue> entry : config.entrySet())
-            {
-                String key = entry.getKey();
-                if (key.equals("meta.configVersion"))
-                    continue;
-
-                boolean secret = isSecretKey(key);
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("key", key);
-                item.put("secret", secret);
-                switch (entry.getValue().valueType())
-                {
-                    case BOOLEAN ->
-                    {
-                        item.put("type", "boolean");
-                        item.put("value", config.getBoolean(key));
-                    }
-                    case NUMBER ->
-                    {
-                        item.put("type", "number");
-                        item.put("value", entry.getValue().unwrapped());
-                    }
-                    case LIST ->
-                    {
-                        item.put("type", "list");
-                        item.put("value", config.getStringList(key));
-                    }
-                    default ->
-                    {
-                        item.put("type", "string");
-                        // Never send the bot token to the page; it is write-only.
-                        item.put("value", secret ? "" : config.getString(key));
-                    }
-                }
-
-                if (defaults.hasPath(key))
-                {
-                    ConfigValue defaultValue = defaults.getValue(key);
-                    switch (defaultValue.valueType())
-                    {
-                        case BOOLEAN -> item.put("defaultValue", defaults.getBoolean(key));
-                        case NUMBER -> item.put("defaultValue", defaultValue.unwrapped());
-                        case LIST -> item.put("defaultValue", defaults.getStringList(key));
-                        default -> item.put("defaultValue", defaults.getString(key));
-                    }
-                }
-                item.put("resettable", !key.equals("discord.token") && !key.equals("discord.owner"));
-                entries.add(item);
-            }
-            entries.sort(Comparator.comparing(item -> String.valueOf(item.get("key"))));
-            sendJson(exchange, 200, Map.of("path", path.toAbsolutePath().toString(), "entries", entries));
+            sendJson(exchange, 200, Map.of("path", path.toAbsolutePath().toString(),
+                    "entries", describeSettings(config, loadDefaults())));
             return;
         }
 
@@ -552,6 +548,71 @@ public class WebServer
     }
 
     /**
+     * Describes every setting of the configuration for the settings form.
+     *
+     * <p>Numbers travel as text. A Discord id has 18 or 19 digits and JavaScript numbers hold
+     * 15 to 17, so an id sent as a JSON number comes back with its last digits changed.
+     *
+     * @param config the configuration to describe
+     * @param defaults the values the reset buttons restore
+     * @return one entry per setting, sorted by key
+     */
+    public static List<Map<String, Object>> describeSettings(Config config, Config defaults)
+    {
+        List<Map<String, Object>> entries = new ArrayList<>();
+        for (Map.Entry<String, ConfigValue> entry : config.entrySet())
+        {
+            String key = entry.getKey();
+            if (key.equals("meta.configVersion"))
+                continue;
+
+            boolean secret = isSecretKey(key);
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("key", key);
+            item.put("secret", secret);
+            item.put("type", typeName(entry.getValue()));
+            // Never send the bot token to the page; it is write-only.
+            item.put("value", secret ? "" : valueOf(config, key));
+            if (hasSetting(defaults, key))
+                item.put("defaultValue", valueOf(defaults, key));
+            item.put("resettable", !key.equals("discord.token") && !key.equals("discord.owner"));
+            ConfigOption.findByKey(key).map(ConfigOption::getDescription)
+                    .filter(description -> !description.isBlank())
+                    .ifPresent(description -> item.put("description", description));
+            if (CHOICES.containsKey(key))
+                item.put("options", CHOICES.get(key));
+            entries.add(item);
+        }
+        entries.sort(Comparator.comparing(item -> String.valueOf(item.get("key"))));
+        return entries;
+    }
+
+    private static String typeName(ConfigValue value)
+    {
+        return switch (value.valueType())
+        {
+            case BOOLEAN -> "boolean";
+            case NUMBER -> "number";
+            case LIST -> "list";
+            default -> "string";
+        };
+    }
+
+    private static Object valueOf(Config config, String key)
+    {
+        ConfigValue value = config.getValue(key);
+        return switch (value.valueType())
+        {
+            case BOOLEAN -> config.getBoolean(key);
+            case NUMBER -> value.unwrapped() instanceof Double number
+                    ? BigDecimal.valueOf(number).stripTrailingZeros().toPlainString()
+                    : String.valueOf(value.unwrapped());
+            case LIST -> config.getStringList(key);
+            default -> config.getString(key);
+        };
+    }
+
+    /**
      * Applies edited settings to the text of {@code config.txt}, keeping its comments.
      *
      * <p>Only settings that already exist in the file can be changed, and each value is written
@@ -712,7 +773,7 @@ public class WebServer
                 case "seek" ->
                 {
                     AudioTrack track = handler.getPlayer().getPlayingTrack();
-                    if (track != null)
+                    if (track != null && track.isSeekable())
                         track.setPosition(Math.max(0, ((Number) value).longValue()));
                 }
                 case "shuffle" -> handler.getQueue().shuffle(0);
@@ -811,7 +872,9 @@ public class WebServer
         info.put("author", track.getInfo().author);
         info.put("uri", track.getInfo().uri);
         info.put("artwork", track.getInfo().artworkUrl);
-        info.put("durationMs", track.getDuration());
+        info.put("durationMs", durationOf(track));
+        info.put("stream", isStream(track));
+        info.put("seekable", track.isSeekable());
         info.put("positionMs", track.getPosition());
         info.put("paused", handler.getPlayer().isPaused());
         info.put("volume", handler.getPlayer().getVolume());
@@ -842,7 +905,8 @@ public class WebServer
             item.put("position", position++);
             item.put("title", track.getInfo().title);
             item.put("author", track.getInfo().author);
-            item.put("durationMs", track.getDuration());
+            item.put("durationMs", durationOf(track));
+            item.put("stream", isStream(track));
             RequestMetadata metadata = queued.getRequestMetadata();
             item.put("requester", metadata == null || metadata.user == null ? "" : metadata.user.username);
             list.add(item);
@@ -866,7 +930,8 @@ public class WebServer
             item.put("id", Integer.toHexString(System.identityHashCode(queued)));
             item.put("title", track.getInfo().title);
             item.put("author", track.getInfo().author);
-            item.put("durationMs", track.getDuration());
+            item.put("durationMs", durationOf(track));
+            item.put("stream", isStream(track));
             list.add(item);
         }
         return list;
@@ -922,10 +987,30 @@ public class WebServer
         }
     }
 
+    /**
+     * A live stream has no length: lavaplayer reports the largest long, which would be shown
+     * as a track that lasts 292 million years.
+     *
+     * @param track the track to look at
+     * @return true when the track has no known end
+     */
+    public static boolean isStream(AudioTrack track)
+    {
+        return track.getInfo().isStream || track.getDuration() == Units.DURATION_MS_UNKNOWN;
+    }
+
+    /**
+     * @param track the track to look at
+     * @return its length in milliseconds, or 0 for a stream
+     */
+    public static long durationOf(AudioTrack track)
+    {
+        return isStream(track) ? 0 : track.getDuration();
+    }
+
     private static String version()
     {
-        String version = JMusicBot.class.getPackage().getImplementationVersion();
-        return version == null ? "0.7.0" : version;
+        return OtherUtil.getCurrentVersion();
     }
 
     private List<String> readLogTail(int lines)
@@ -953,10 +1038,10 @@ public class WebServer
         if (path == null || path.equals("/"))
             path = "/index.html";
 
-        Path file = webRoot.resolve(path.substring(1)).normalize();
-        if (!file.startsWith(webRoot) || !Files.isRegularFile(file))
+        byte[] body = readStatic(path.substring(1));
+        if (body == null)
         {
-            byte[] body = ("Web UI not found. Expected " + webRoot).getBytes(StandardCharsets.UTF_8);
+            body = "Not found.".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
             exchange.sendResponseHeaders(404, body.length);
             try (OutputStream out = exchange.getResponseBody())
@@ -966,14 +1051,13 @@ public class WebServer
             return;
         }
 
-        byte[] body = Files.readAllBytes(file);
-        if ("index.html".equalsIgnoreCase(file.getFileName().toString()))
+        if (path.equals("/index.html"))
         {
             // Seed the saved theme before the bundle runs so dark mode does not flash light.
             body = injectTheme(new String(body, StandardCharsets.UTF_8), readThemeMode())
                     .getBytes(StandardCharsets.UTF_8);
         }
-        exchange.getResponseHeaders().set("Content-Type", contentType(file));
+        exchange.getResponseHeaders().set("Content-Type", contentType(path));
         exchange.getResponseHeaders().set("Cache-Control", "no-store");
         exchange.sendResponseHeaders(200, body.length);
         try (OutputStream out = exchange.getResponseBody())
@@ -982,9 +1066,36 @@ public class WebServer
         }
     }
 
-    private static String contentType(Path file)
+    /**
+     * Reads one file of the web UI, from the folder being served or from the jar.
+     *
+     * @param relative the path below the web root, with forward slashes
+     * @return the contents, or null when there is no such file
+     * @throws IOException when the file exists but cannot be read
+     */
+    private byte[] readStatic(String relative) throws IOException
     {
-        String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+        // Checked as text first: it also keeps a request from naming a resource outside web/.
+        if (relative.isEmpty() || relative.contains("..") || relative.contains("\\")
+                || relative.contains(":") || relative.startsWith("/"))
+            return null;
+
+        if (webRoot != null)
+        {
+            Path file = webRoot.resolve(relative).normalize();
+            return file.startsWith(webRoot) && Files.isRegularFile(file) ? Files.readAllBytes(file) : null;
+        }
+        if (!embedded)
+            return null;
+        try (InputStream in = WebServer.class.getResourceAsStream(EMBEDDED_ROOT + relative))
+        {
+            return in == null ? null : in.readAllBytes();
+        }
+    }
+
+    private static String contentType(String path)
+    {
+        String name = path.toLowerCase(Locale.ROOT);
         if (name.endsWith(".html")) return "text/html; charset=utf-8";
         if (name.endsWith(".js")) return "text/javascript; charset=utf-8";
         if (name.endsWith(".css")) return "text/css; charset=utf-8";

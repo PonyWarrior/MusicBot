@@ -1,6 +1,8 @@
 package com.jagrosh.jmusicbot.unit.web;
 
 import com.jagrosh.jmusicbot.web.WebServer;
+import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
+import com.sedmelluq.discord.lavaplayer.track.AudioTrackInfo;
 import com.typesafe.config.Config;
 import com.typesafe.config.ConfigFactory;
 import org.junit.jupiter.api.Test;
@@ -14,12 +16,16 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
- * Covers the small pure helpers on {@link WebServer}: the pre-paint theme injection and the
- * rule that keeps the bot token out of the settings response.
+ * Covers the pure helpers on {@link WebServer}: the pre-paint theme injection, what the
+ * settings form is told and what it may change, where the page is served from and how a
+ * stream is reported.
  */
 class WebServerUnitTest
 {
@@ -159,19 +165,20 @@ class WebServerUnitTest
         assertEquals(CONFIG, apply("discord.token", "   "));
     }
 
-    @Test
-    void aCheckoutServesItsBuildOutputBeforeAnOldCopy(@TempDir Path work) throws IOException
+    private static Path page(Path folder) throws IOException
     {
-        Files.createDirectories(work.resolve("web"));
-        Files.createDirectories(work.resolve("webui/dist"));
-        assertEquals(work.resolve("webui/dist"), WebServer.resolveWebRoot(work, null));
+        Files.createDirectories(folder);
+        Files.writeString(folder.resolve("index.html"), PAGE);
+        return folder;
     }
 
     @Test
-    void aPackageServesItsWebFolder(@TempDir Path work) throws IOException
+    void aCheckoutServesItsBuildOutputBeforeAnOldCopy(@TempDir Path work) throws IOException
     {
-        Files.createDirectories(work.resolve("web"));
-        assertEquals(work.resolve("web"), WebServer.resolveWebRoot(work, work));
+        page(work.resolve("web"));
+        Path build = page(work.resolve("webui/dist"));
+        assertEquals(build, WebServer.resolveWebRoot(work, null, false));
+        assertEquals(build, WebServer.resolveWebRoot(work, null, true));
     }
 
     @Test
@@ -179,15 +186,113 @@ class WebServerUnitTest
     {
         Path work = Files.createDirectories(root.resolve("elsewhere"));
         Path target = Files.createDirectories(root.resolve("clone/target"));
-        Files.createDirectories(root.resolve("clone/webui/dist"));
-        assertEquals(root.resolve("clone/webui/dist"), WebServer.resolveWebRoot(work, target));
+        Path build = page(root.resolve("clone/webui/dist"));
+        assertEquals(build, WebServer.resolveWebRoot(work, target, true));
     }
 
     @Test
-    void aMissingWebUiFallsBackToTheWebFolderOfTheWorkingDirectory(@TempDir Path work)
+    void aJarWithoutTheWebUiServesAWebFolder(@TempDir Path root) throws IOException
     {
-        assertEquals(work.resolve("web"), WebServer.resolveWebRoot(work, null));
-        assertEquals(work.resolve("web"), WebServer.resolveWebRoot(work, work.resolve("target")));
+        Path work = Files.createDirectories(root.resolve("work"));
+        Path code = Files.createDirectories(root.resolve("code"));
+        Path besideTheJar = page(code.resolve("web"));
+        assertEquals(besideTheJar, WebServer.resolveWebRoot(work, code, false));
+
+        Path inTheWorkingDirectory = page(work.resolve("web"));
+        assertEquals(inTheWorkingDirectory, WebServer.resolveWebRoot(work, code, false));
+    }
+
+    @Test
+    void aWebFolderOfAnOlderPackageDoesNotReplaceThePageInTheJar(@TempDir Path work) throws IOException
+    {
+        page(work.resolve("web"));
+        assertNull(WebServer.resolveWebRoot(work, work, true));
+    }
+
+    @Test
+    void aFolderWithoutAPageIsNotAWebUi(@TempDir Path work) throws IOException
+    {
+        Files.createDirectories(work.resolve("webui/dist"));
+        Files.createDirectories(work.resolve("web"));
+        assertNull(WebServer.resolveWebRoot(work, null, false));
+        assertNull(WebServer.resolveWebRoot(work, work.resolve("target"), false));
+    }
+
+    private static Map<String, Object> setting(String hocon, String defaults, String key)
+    {
+        return WebServer.describeSettings(ConfigFactory.parseString(hocon), ConfigFactory.parseString(defaults))
+                .stream().filter(item -> key.equals(item.get("key"))).findFirst().orElseThrow();
+    }
+
+    @Test
+    void numbersTravelAsTextSoALongIdKeepsEveryDigit()
+    {
+        Map<String, Object> owner = setting("discord.owner = 123456789012345678", "discord.owner = 0",
+                "discord.owner");
+        assertEquals("number", owner.get("type"));
+        assertEquals("123456789012345678", owner.get("value"));
+        assertEquals("0", owner.get("defaultValue"));
+
+        assertEquals("0.55", setting("playback.skipRatio = 0.55", "", "playback.skipRatio").get("value"));
+        assertEquals("0.0000001", setting("x.tiny = 1e-7", "", "x.tiny").get("value"));
+        assertEquals("40", setting("playback.maxHistorySize = 40", "", "playback.maxHistorySize").get("value"));
+    }
+
+    @Test
+    void theTokenIsNeverDescribedWithItsValue()
+    {
+        Map<String, Object> token = setting("discord.token = \"secret-token\"",
+                "discord.token = BOT_TOKEN_HERE", "discord.token");
+        assertEquals("", token.get("value"));
+        assertEquals(true, token.get("secret"));
+        assertEquals(false, token.get("resettable"));
+    }
+
+    @Test
+    void settingsCarryTheirDescriptionAndChoices()
+    {
+        Map<String, Object> level = setting("logging.level = info", "", "logging.level");
+        assertEquals(List.of("off", "error", "warn", "info", "debug", "trace", "all"), level.get("options"));
+        assertTrue(String.valueOf(level.get("description")).startsWith("Logging verbosity"));
+        assertFalse(level.containsKey("defaultValue"));
+
+        Map<String, Object> unknown = setting("some.custom = true", "", "some.custom");
+        assertFalse(unknown.containsKey("description"));
+        assertFalse(unknown.containsKey("options"));
+        assertEquals(true, unknown.get("value"));
+    }
+
+    @Test
+    void settingsAreSortedAndLeaveTheConfigVersionOut()
+    {
+        List<Map<String, Object>> entries = WebServer.describeSettings(
+                ConfigFactory.parseString("b.two = 2\na.one = [ x, y ]\nmeta.configVersion = 2"),
+                ConfigFactory.empty());
+        assertEquals(List.of("a.one", "b.two"), entries.stream().map(item -> item.get("key")).toList());
+        assertEquals(List.of("x", "y"), entries.get(0).get("value"));
+        assertEquals("list", entries.get(0).get("type"));
+    }
+
+    private static AudioTrack track(boolean stream, long duration)
+    {
+        AudioTrack track = mock(AudioTrack.class);
+        when(track.getInfo()).thenReturn(new AudioTrackInfo("title", "author", duration, "id", stream, "uri"));
+        when(track.getDuration()).thenReturn(duration);
+        return track;
+    }
+
+    @Test
+    void aStreamHasNoLength()
+    {
+        assertFalse(WebServer.isStream(track(false, 200_000)));
+        assertEquals(200_000, WebServer.durationOf(track(false, 200_000)));
+
+        assertTrue(WebServer.isStream(track(true, 200_000)));
+        assertEquals(0, WebServer.durationOf(track(true, 200_000)));
+
+        // A live stream reports the largest long as its duration.
+        assertTrue(WebServer.isStream(track(false, Long.MAX_VALUE)));
+        assertEquals(0, WebServer.durationOf(track(false, Long.MAX_VALUE)));
     }
 
     private static int count(String text, String needle)

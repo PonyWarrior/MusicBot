@@ -413,6 +413,18 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- The web UI travels inside the jar when it was built first (pnpm build in webui/).
+                 Without that folder the jar is built without a web UI and the bot opens the
+                 Swing window instead. -->
+            <resource>
+                <directory>webui/dist</directory>
+                <targetPath>web</targetPath>
+            </resource>
+        </resources>
         <pluginManagement>
             <plugins>
                 <plugin>

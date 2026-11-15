@@ -13,9 +13,14 @@ import { Text } from '@astryxdesign/core/Text';
 import { useToast } from '@astryxdesign/core/Toast';
 import { VStack } from '@astryxdesign/core/VStack';
 import { fetchLogs, fetchState, fetchTheme, restartBot, runAction, saveTheme, type State } from './api';
-import Dashboard from './Dashboard';
 import Advanced from './Advanced';
+import ConfirmDialog, { type ConfirmRequest } from './ConfirmDialog';
+import Dashboard from './Dashboard';
 import Dropdown from './Dropdown';
+import { formatVersion } from './format';
+import { MoonIcon, SunIcon } from './Icons';
+import type { SettingsHandle } from './SettingsPanel';
+import { share } from './share';
 
 type Mode = 'light' | 'dark';
 
@@ -30,6 +35,10 @@ function initialMode(): Mode {
   return attribute === 'dark' ? 'dark' : attribute === 'light' ? 'light' : systemMode();
 }
 
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function App() {
   const [state, setState] = useState<State | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
@@ -38,11 +47,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [advancedOpened, setAdvancedOpened] = useState(false);
   const [mode, setMode] = useState<Mode>(initialMode);
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const toast = useToast();
   const toastRef = useRef(toast);
-  toastRef.current = toast;
+  useEffect(() => {
+    toastRef.current = toast;
+  });
   const stateBusy = useRef(false);
   const logsBusy = useRef(false);
+  const settings = useRef<SettingsHandle>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,11 +72,26 @@ export default function App() {
     };
   }, []);
 
+  // The window's own right-click menu offers "Reload page", which would throw unsaved
+  // settings away. Text fields keep their menu, for copy and paste.
+  useEffect(() => {
+    const onContextMenu = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      event.preventDefault();
+    };
+    document.addEventListener('contextmenu', onContextMenu);
+    return () => document.removeEventListener('contextmenu', onContextMenu);
+  }, []);
+
   const toggleMode = () => {
     const next: Mode = mode === 'dark' ? 'light' : 'dark';
     setMode(next);
     saveTheme(next).catch(() => {
-      // The choice still applies for this session.
+      toastRef.current({
+        body: 'The theme could not be saved. It applies until this window is closed.',
+        type: 'error',
+      });
     });
   };
 
@@ -72,16 +100,19 @@ export default function App() {
     stateBusy.current = true;
     try {
       const next = await fetchState(guildId);
-      setState((current) => (sameState(current, next) ? current : next));
+      // Parts that did not change keep their identity, so only what changed renders again.
+      setState((current) => share(current, next));
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(messageOf(e));
     } finally {
       stateBusy.current = false;
     }
   }, [guildId]);
 
   useEffect(() => {
+    // This starts a request; the state is set when the bot answers, not during the effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
     const timer = setInterval(() => {
       if (!document.hidden) refresh();
@@ -104,9 +135,9 @@ export default function App() {
       logsBusy.current = true;
       try {
         const lines = await fetchLogs(200);
-        if (!cancelled) setLogs((current) => (sameLines(current, lines) ? current : lines));
+        if (!cancelled) setLogs((current) => share(current, lines));
       } catch {
-        // The log endpoint is best effort.
+        // The log endpoint is best effort; the banner already reports a bot that is gone.
       } finally {
         logsBusy.current = false;
       }
@@ -136,27 +167,61 @@ export default function App() {
       } catch (e) {
         // A toast, not the banner: the banner is cleared by the next successful poll, which
         // is less than a second away.
-        toastRef.current({ body: e instanceof Error ? e.message : String(e), type: 'error' });
+        toastRef.current({ body: messageOf(e), type: 'error' });
       }
     },
     [refresh, shownGuild],
   );
 
-  const restart = useCallback(async () => {
+  const stop = useCallback(() => {
+    setConfirm({
+      title: 'Stop playback?',
+      body: 'This clears the queue and disconnects the bot from the voice channel.',
+      actions: [{ label: 'Stop', variant: 'destructive', run: () => act('stop') }],
+    });
+  }, [act]);
+
+  const restartNow = useCallback(async () => {
     try {
       toastRef.current({ body: 'Restarting the bot…', isAutoHide: false });
       await restartBot();
     } catch (e) {
-      toastRef.current({
-        body: `Restart failed: ${e instanceof Error ? e.message : String(e)}`,
-        type: 'error',
-      });
+      toastRef.current({ body: `Restart failed: ${messageOf(e)}`, type: 'error' });
     }
   }, []);
 
+  const requestRestart = () => {
+    const unsaved = settings.current?.unsaved() ?? 0;
+    const interrupts = 'Playback stops in every server while the bot restarts.';
+    if (unsaved === 0) {
+      setConfirm({
+        title: 'Restart the bot?',
+        body: interrupts,
+        actions: [{ label: 'Restart', run: restartNow }],
+      });
+      return;
+    }
+    setConfirm({
+      title: 'Restart the bot?',
+      body: `${interrupts} You have ${unsaved} unsaved setting change${
+        unsaved === 1 ? '' : 's'
+      }, which a restart without saving discards.`,
+      actions: [
+        { label: 'Restart without saving', variant: 'secondary', run: restartNow },
+        {
+          label: 'Save and restart',
+          run: async () => {
+            if (await settings.current?.save({ quiet: true })) restartNow();
+            // The form explains what stopped the save, so show it.
+            else setTab('advanced');
+          },
+        },
+      ],
+    });
+  };
+
   // The Advanced tab stays mounted once it has been opened, so unsaved setting edits survive
-  // a visit to the Dashboard. (window.confirm is not an option: the JavaFX WebView has no
-  // confirm handler and always answers false.)
+  // a visit to the Dashboard.
   const changeTab = (next: string) => {
     if (next === 'advanced') setAdvancedOpened(true);
     setTab(next);
@@ -179,7 +244,7 @@ export default function App() {
                   label={bot?.online ? 'Online' : 'Offline'}
                 />
                 <Text size="sm" color="secondary">
-                  v{bot?.version ?? '0.7.0'}
+                  {formatVersion(bot?.version)}
                 </Text>
               </HStack>
             </VStack>
@@ -202,7 +267,7 @@ export default function App() {
               size="sm"
               onClick={toggleMode}
             />
-            <Button label="Restart" variant="secondary" size="sm" onClick={restart} />
+            <Button label="Restart" variant="secondary" size="sm" onClick={requestRestart} />
           </div>
           <TabList value={tab} onChange={changeTab} aria-label="Sections" className="app-tabs">
             <Tab value="dashboard" label="Dashboard" />
@@ -214,73 +279,32 @@ export default function App() {
           {error && (
             <div role="alert">
               <Card padding={3} variant="muted" className="error-banner">
-                <Text color="secondary">{error}</Text>
+                <Text color="secondary">{error} Trying again…</Text>
               </Card>
             </div>
           )}
           {!state ? (
-            <Text color="secondary">Connecting to the bot…</Text>
+            !error && <Text color="secondary">Connecting to the bot…</Text>
           ) : (
             <>
-              {tab === 'dashboard' && (
-                <Dashboard state={state} logs={logs} act={act} restart={restart} />
-              )}
+              {tab === 'dashboard' && <Dashboard state={state} logs={logs} act={act} stop={stop} />}
               {advancedOpened && (
                 <div hidden={tab !== 'advanced'}>
-                  <Advanced state={state} logs={logs} restart={restart} />
+                  <Advanced
+                    state={state}
+                    logs={logs}
+                    visible={tab === 'advanced'}
+                    restartNow={restartNow}
+                    settings={settings}
+                  />
                 </div>
               )}
             </>
           )}
         </main>
+
+        <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
       </div>
     </Theme>
-  );
-}
-
-function sameState(current: State | null, next: State): boolean {
-  return current !== null && JSON.stringify(current) === JSON.stringify(next);
-}
-
-function sameLines(current: string[], next: string[]): boolean {
-  return (
-    current.length === next.length && current.every((line, index) => line === next[index])
-  );
-}
-
-function SunIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-    </svg>
   );
 }

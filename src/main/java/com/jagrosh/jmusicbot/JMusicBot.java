@@ -280,8 +280,12 @@ public class JMusicBot
             if (webGui)
             {
                 WebServer webServer = new WebServer(bot);
-                int port = webServer.start();
                 boolean opened = false;
+                // A jar built without the web UI has no page to show; a window that only says
+                // "not found" would hide that a working GUI is available.
+                int port = webServer.hasWebUi() ? webServer.start() : -1;
+                if (port <= 0 && !webServer.hasWebUi())
+                    LOG.error("This build does not contain the web UI (webui/dist was not built before packaging).");
                 if (port > 0)
                 {
                     try

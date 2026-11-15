@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -18,6 +19,8 @@ interface Props {
   onChange: (value: string) => void;
   label?: string;
   ariaLabel?: string;
+  /** The id of a hint shown next to the dropdown. */
+  describedBy?: string;
   width?: number | string;
 }
 
@@ -38,7 +41,17 @@ const VIEWPORT_MARGIN = 8;
  * <p>CSS anchor positioning would do the flip declaratively, but the JavaFX WebView used by
  * the desktop app does not support it, so this is measured in JavaScript.
  */
-export default function Dropdown({ value, options, onChange, label, ariaLabel, width }: Props) {
+export default function Dropdown({
+  value,
+  options,
+  onChange,
+  label,
+  ariaLabel,
+  describedBy,
+  width,
+}: Props) {
+  const labelId = useId();
+  const valueId = useId();
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<Position | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -187,21 +200,36 @@ export default function Dropdown({ value, options, onChange, label, ariaLabel, w
   };
 
   const selected = options.find((option) => option.value === value);
+  const shown = selected?.label ?? (value || 'Select…');
+
+  // The name of the button is its label and the value it shows: a name that leaves the
+  // visible text out hides the current choice from a screen reader and from voice control.
+  const name = label
+    ? { 'aria-labelledby': `${labelId} ${valueId}` }
+    : { 'aria-label': ariaLabel ? `${ariaLabel}: ${shown}` : shown };
+  const menuName = label ? { 'aria-labelledby': labelId } : { 'aria-label': ariaLabel };
 
   return (
     <div className="dropdown" style={{ width }}>
-      {label && <span className="setting-label">{label}</span>}
+      {label && (
+        <span className="setting-label" id={labelId}>
+          {label}
+        </span>
+      )}
       <button
         ref={triggerRef}
         type="button"
         className="dropdown-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={ariaLabel ?? label}
+        aria-describedby={describedBy}
+        {...name}
         onClick={() => (open ? closeMenu(false) : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >
-        <span className="dropdown-value">{selected?.label ?? value ?? 'Select…'}</span>
+        <span className="dropdown-value" id={valueId}>
+          {shown}
+        </span>
         <span className="dropdown-chevron" aria-hidden="true">
           ▾
         </span>
@@ -211,7 +239,7 @@ export default function Dropdown({ value, options, onChange, label, ariaLabel, w
           ref={menuRef}
           className="dropdown-menu"
           role="listbox"
-          aria-label={ariaLabel ?? label}
+          {...menuName}
           style={{
             position: 'fixed',
             top: position.top,
