@@ -69,4 +69,109 @@ class MusicLibraryDeletionTest
         assertFalse(Files.exists(song));
         assertFalse(Files.exists(tempDir.resolve(".pending-deletions.txt")));
     }
+
+    @Test
+    @DisplayName("a pending deletion outside the library is ignored")
+    void pendingDeletionOutsideLibraryIsIgnored(@TempDir Path elsewhere) throws IOException
+    {
+        Path outside = elsewhere.resolve("keep.flac");
+        Files.writeString(outside, "audio");
+        Files.writeString(tempDir.resolve(".pending-deletions.txt"),
+                outside.toAbsolutePath().normalize() + System.lineSeparator(), StandardCharsets.UTF_8);
+
+        new MusicLibrary(tempDir).processPendingDeletions();
+
+        assertTrue(Files.exists(outside), "a file outside the library must never be deleted");
+        assertFalse(Files.exists(tempDir.resolve(".pending-deletions.txt")));
+    }
+
+    @Test
+    @DisplayName("a cancelled deletion keeps the file and leaves the other entries")
+    void cancelledDeletionKeepsTheFile() throws IOException
+    {
+        Path wanted = tempDir.resolve("wanted.flac");
+        Path unwanted = tempDir.resolve("unwanted.flac");
+        Files.writeString(wanted, "audio");
+        Files.writeString(unwanted, "audio");
+
+        MusicLibrary library = new MusicLibrary(tempDir);
+        library.scheduleDeletion(wanted);
+        library.scheduleDeletion(unwanted);
+        library.cancelDeletion(wanted);
+        library.processPendingDeletions();
+
+        assertTrue(Files.exists(wanted));
+        assertFalse(Files.exists(unwanted));
+    }
+
+    @Test
+    @DisplayName("only recorded downloads count as downloaded, across instances")
+    void recordedDownloadsAreRemembered() throws IOException
+    {
+        Path download = tempDir.resolve("download.flac");
+        Path own = tempDir.resolve("my-own-song.flac");
+        Files.writeString(download, "audio");
+        Files.writeString(own, "audio");
+
+        MusicLibrary library = new MusicLibrary(tempDir);
+        library.recordDownload(download);
+
+        assertTrue(library.isDownloaded(download));
+        assertFalse(library.isDownloaded(own));
+
+        MusicLibrary reopened = new MusicLibrary(tempDir);
+        assertTrue(reopened.isDownloaded(download));
+        assertFalse(reopened.isDownloaded(own));
+
+        reopened.forgetDownload(download);
+        assertFalse(new MusicLibrary(tempDir).isDownloaded(download));
+    }
+
+    @Test
+    @DisplayName("a library without a manifest treats tracks with a yt-dlp sidecar as downloads")
+    void manifestIsSeededFromSidecars() throws IOException
+    {
+        Path download = tempDir.resolve("old-download.flac");
+        Path own = tempDir.resolve("my-own-song.flac");
+        Files.writeString(download, "audio");
+        Files.writeString(tempDir.resolve("old-download.info.json"), "{}");
+        Files.writeString(own, "audio");
+
+        MusicLibrary library = new MusicLibrary(tempDir);
+
+        assertTrue(library.isDownloaded(download));
+        assertFalse(library.isDownloaded(own));
+        assertTrue(Files.exists(tempDir.resolve(".downloads.txt")));
+    }
+
+    @Test
+    @DisplayName("a file outside the library is never a download")
+    void fileOutsideLibraryIsNotADownload(@TempDir Path elsewhere) throws IOException
+    {
+        Path outside = elsewhere.resolve("song.flac");
+        Files.writeString(outside, "audio");
+
+        MusicLibrary library = new MusicLibrary(tempDir);
+        library.recordDownload(outside);
+
+        assertFalse(library.isDownloaded(outside));
+        assertFalse(library.contains(outside));
+        assertFalse(library.contains(tempDir));
+    }
+
+    @Test
+    @DisplayName("a deleted pending file is forgotten as a download")
+    void deletedPendingFileIsForgotten() throws IOException
+    {
+        Path song = tempDir.resolve("song.flac");
+        Files.writeString(song, "audio");
+
+        MusicLibrary library = new MusicLibrary(tempDir);
+        library.recordDownload(song);
+        library.scheduleDeletion(song);
+        library.processPendingDeletions();
+
+        assertFalse(Files.exists(song));
+        assertFalse(library.isDownloaded(song));
+    }
 }

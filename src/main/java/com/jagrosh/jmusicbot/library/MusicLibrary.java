@@ -22,10 +22,12 @@ import java.nio.file.Path;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
@@ -134,6 +136,192 @@ public class MusicLibrary
     }
 
     /**
+     * Takes a file off the deletion list, because it is wanted again (for example it was
+     * favorited again before the deletion could happen).
+     *
+     * @param file the file to keep
+     */
+    public void cancelDeletion(Path file)
+    {
+        Path pending = folder.resolve(PENDING_DELETIONS_FILE);
+        if(file == null || !Files.isRegularFile(pending))
+            return;
+        Path absolute = file.toAbsolutePath().normalize();
+        synchronized(deletionLock)
+        {
+            try
+            {
+                List<String> remaining = new ArrayList<>();
+                boolean changed = false;
+                for(String line : Files.readAllLines(pending, StandardCharsets.UTF_8))
+                {
+                    Path listed = parsePath(line.trim());
+                    if(listed != null && listed.toAbsolutePath().normalize().equals(absolute))
+                        changed = true;
+                    else if(!line.isBlank())
+                        remaining.add(line.trim());
+                }
+                if(!changed)
+                    return;
+                if(remaining.isEmpty())
+                    Files.deleteIfExists(pending);
+                else
+                    Files.write(pending, remaining, StandardCharsets.UTF_8);
+                LOG.info("{} is wanted again, its deletion was cancelled", absolute);
+            }
+            catch(IOException e)
+            {
+                LOG.warn("Could not cancel the deletion of {}: {}", absolute, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * @param file a file
+     * @return true when the file is inside the library folder (and is not the folder itself)
+     */
+    public boolean contains(Path file)
+    {
+        if(file == null)
+            return false;
+        Path absolute = file.toAbsolutePath().normalize();
+        return absolute.startsWith(folder) && !absolute.equals(folder);
+    }
+
+    private static Path parsePath(String value)
+    {
+        if(value == null || value.isEmpty())
+            return null;
+        try
+        {
+            return Path.of(value);
+        }
+        catch(RuntimeException e)
+        {
+            return null;
+        }
+    }
+
+    // ========== Downloads manifest ==========
+
+    /**
+     * Lists the files the bot downloaded itself, relative to the library folder. Only these
+     * may be deleted when a track is unfavorited: the folder can also hold the user's own music.
+     * It has no audio extension, so it is not listed as a track.
+     */
+    private static final String DOWNLOADS_FILE = ".downloads.txt";
+
+    private final Object downloadsLock = new Object();
+    private Set<Path> downloads;
+
+    /**
+     * Remembers that the bot downloaded a file.
+     *
+     * @param file the downloaded file
+     */
+    public void recordDownload(Path file)
+    {
+        if(!contains(file))
+            return;
+        synchronized(downloadsLock)
+        {
+            if(loadDownloads().add(file.toAbsolutePath().normalize()))
+                saveDownloads();
+        }
+    }
+
+    /**
+     * Forgets a downloaded file, because it was deleted.
+     *
+     * @param file the file
+     */
+    public void forgetDownload(Path file)
+    {
+        if(file == null)
+            return;
+        synchronized(downloadsLock)
+        {
+            if(loadDownloads().remove(file.toAbsolutePath().normalize()))
+                saveDownloads();
+        }
+    }
+
+    /**
+     * @param file a file
+     * @return true when the bot downloaded this file, so it may delete it again
+     */
+    public boolean isDownloaded(Path file)
+    {
+        if(!contains(file))
+            return false;
+        synchronized(downloadsLock)
+        {
+            return loadDownloads().contains(file.toAbsolutePath().normalize());
+        }
+    }
+
+    private Set<Path> loadDownloads()
+    {
+        if(downloads != null)
+            return downloads;
+
+        Set<Path> loaded = new HashSet<>();
+        Path manifest = folder.resolve(DOWNLOADS_FILE);
+        if(Files.isRegularFile(manifest))
+        {
+            try
+            {
+                for(String line : Files.readAllLines(manifest, StandardCharsets.UTF_8))
+                {
+                    Path relative = parsePath(line.trim());
+                    if(relative == null)
+                        continue;
+                    Path absolute = folder.resolve(relative).normalize();
+                    if(contains(absolute))
+                        loaded.add(absolute);
+                }
+            }
+            catch(IOException e)
+            {
+                LOG.warn("Could not read the downloads manifest: {}", e.getMessage());
+            }
+            downloads = loaded;
+        }
+        else
+        {
+            // A library from before the manifest existed: yt-dlp writes an info sidecar next
+            // to every download, so a track that has one was downloaded by the bot.
+            for(Path track : listTracks())
+                if(sidecarOf(track) != null)
+                    loaded.add(track.toAbsolutePath().normalize());
+            downloads = loaded;
+            if(!loaded.isEmpty())
+                saveDownloads();
+        }
+        return downloads;
+    }
+
+    private void saveDownloads()
+    {
+        try
+        {
+            Files.createDirectories(folder);
+            List<String> lines = downloads.stream()
+                    .map(path -> folder.relativize(path).toString())
+                    .sorted()
+                    .toList();
+            Path manifest = folder.resolve(DOWNLOADS_FILE);
+            Path temp = folder.resolve(DOWNLOADS_FILE + ".tmp");
+            Files.write(temp, lines, StandardCharsets.UTF_8);
+            Files.move(temp, manifest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
+        catch(IOException e)
+        {
+            LOG.warn("Could not write the downloads manifest: {}", e.getMessage());
+        }
+    }
+
+    /**
      * Deletes the files that were scheduled earlier. Files that are still in use stay on the
      * list and are retried later.
      */
@@ -159,15 +347,13 @@ public class MusicLibrary
             for(String line : lines)
             {
                 String value = line.trim();
-                if(value.isEmpty())
+                Path file = parsePath(value);
+                if(file == null)
                     continue;
-                Path file;
-                try
+                // The list is a plain text file; never follow it outside the library.
+                if(!contains(file))
                 {
-                    file = Path.of(value);
-                }
-                catch(RuntimeException e)
-                {
+                    LOG.warn("Ignoring pending deletion outside the music library: {}", value);
                     continue;
                 }
 
@@ -180,7 +366,10 @@ public class MusicLibrary
                     if(!deleted && Files.exists(file))
                         remaining.add(value);
                     else
+                    {
+                        forgetDownload(file);
                         LOG.info("Deleted pending file {}", file);
+                    }
                 }
                 catch(IOException e)
                 {
@@ -240,8 +429,9 @@ public class MusicLibrary
                     .sorted(Comparator.comparing(p -> p.getFileName().toString().toLowerCase(Locale.ROOT)))
                     .toList();
         }
-        catch (IOException e)
+        catch (IOException | java.io.UncheckedIOException e)
         {
+            // Files.walk reports a failure in the middle of the walk as an unchecked exception.
             LOG.error("Could not list the music library: {}", e.getMessage());
             return List.of();
         }

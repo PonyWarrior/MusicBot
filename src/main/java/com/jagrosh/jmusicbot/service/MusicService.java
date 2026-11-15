@@ -67,6 +67,18 @@ public class MusicService
     public static final String HISTORY_DISABLED_MESSAGE =
             "Playback history is disabled by config (playback.maxHistorySize = 0).";
     private static final String FAVORITES_PLAYLIST_NAME = "favorites";
+
+    /** Runs the library downloads, one at a time, off the bot's scheduler thread. */
+    private static final java.util.concurrent.ExecutorService DOWNLOADS =
+            java.util.concurrent.Executors.newSingleThreadExecutor(runnable ->
+            {
+                Thread thread = new Thread(runnable, "library-download");
+                thread.setDaemon(true);
+                return thread;
+            });
+
+    /** The urls that are being downloaded, so a second press does not download twice. */
+    private final java.util.Set<String> downloadsInFlight = ConcurrentHashMap.newKeySet();
     private static final Pattern WINDOWS_DRIVE_ABSOLUTE_PATH = Pattern.compile("^[A-Za-z]:[\\\\/].*");
     private static final boolean WINDOWS_RUNTIME =
             System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
@@ -846,11 +858,17 @@ public class MusicService
         if (!file.isAbsolute())
             return FavoriteFileDeletion.NONE;
 
-        Path libraryFolder = library.getFolder().toAbsolutePath().normalize();
         Path absolute = file.toAbsolutePath().normalize();
-        if (!absolute.startsWith(libraryFolder) || absolute.equals(libraryFolder))
+        if (!library.contains(absolute))
             return FavoriteFileDeletion.NONE;
-        if (isReferencedByAnotherPlaylist(entry))
+        // The library folder can also hold the user's own music. Only a file the bot
+        // downloaded itself is the bot's to delete.
+        if (!library.isDownloaded(absolute))
+        {
+            LOG.info("Keeping {}: it was not downloaded by the bot", absolute);
+            return FavoriteFileDeletion.NONE;
+        }
+        if (isReferencedByAnotherPlaylist(absolute))
         {
             LOG.info("Not deleting {} because another playlist still references it", absolute);
             return FavoriteFileDeletion.NONE;
@@ -864,6 +882,7 @@ public class MusicService
                 Path sidecar = MusicLibrary.sidecarOf(absolute);
                 if (sidecar != null)
                     Files.deleteIfExists(sidecar);
+                library.forgetDownload(absolute);
                 LOG.info("Deleted {} because it was removed from favorites", absolute);
                 return FavoriteFileDeletion.DELETED;
             }
@@ -882,10 +901,10 @@ public class MusicService
     }
 
     /**
-     * @param entry a favorites entry
-     * @return true when a playlist other than favorites still contains the entry
+     * @param file a library file
+     * @return true when a playlist other than favorites still refers to the file
      */
-    private boolean isReferencedByAnotherPlaylist(String entry)
+    private boolean isReferencedByAnotherPlaylist(Path file)
     {
         for (String name : bot.getPlaylistLoader().getPlaylistNames())
         {
@@ -893,10 +912,51 @@ public class MusicService
                 continue;
             PlaylistLoader.PlaylistResult<PlaylistLoader.Playlist> result =
                     bot.getPlaylistLoader().getPlaylistResult(name);
-            if (result.isSuccess() && result.getValue().getItems().contains(entry))
-                return true;
+            if (!result.isSuccess())
+                continue;
+            for (String item : result.getValue().getItems())
+            {
+                // Compared as paths, so another spelling of the same file (case, separators)
+                // still counts as a reference.
+                Path other = toAbsolutePath(item);
+                if (other != null && other.equals(file))
+                    return true;
+            }
         }
         return false;
+    }
+
+    /**
+     * @param entry a playlist entry
+     * @return the entry as a normalized absolute path, or null when it is not one
+     */
+    private static Path toAbsolutePath(String entry)
+    {
+        if (entry == null || entry.isBlank() || isUriLikeReference(entry.trim()))
+            return null;
+        try
+        {
+            Path path = Path.of(entry.trim());
+            return path.isAbsolute() ? path.normalize() : null;
+        }
+        catch (RuntimeException e)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * A library file that is favorited again must not be deleted by an earlier unfavorite
+     * that is still waiting for the file to be released.
+     *
+     * @param entry the favorites entry that was just added
+     */
+    private void keepLibraryFile(String entry)
+    {
+        MusicLibrary library = bot.getMusicLibrary();
+        Path file = toAbsolutePath(entry);
+        if (library != null && file != null && library.contains(file))
+            library.cancelDeletion(file);
     }
 
     public void addCurrentTrackToFavorites(Guild guild, Member member, OutputAdapter output)
@@ -937,6 +997,8 @@ public class MusicService
             output.replyError(mapPlaylistErrorToMessage(appendResult.getError()));
             return;
         }
+
+        keepLibraryFile(favoriteEntry);
 
         if (appendResult.getValue().getStatus() == PlaylistLoader.AppendIfAbsentStatus.ALREADY_PRESENT)
         {
@@ -998,6 +1060,7 @@ public class MusicService
                 output.replyError(mapPlaylistErrorToMessage(appendResult.getError()));
                 return;
             }
+            keepLibraryFile(uri);
             handler.markCurrentTrackFavorited(uri);
             output.editNowPlaying(handler);
             output.replySuccess("**" + FormatUtil.filter(FormatUtil.getTrackTitle(currentTrack))
@@ -1021,14 +1084,23 @@ public class MusicService
         }
 
         String title = FormatUtil.filter(FormatUtil.getTrackTitle(currentTrack));
+        if (!downloadsInFlight.add(uri))
+        {
+            output.replyWarning("**" + title + "** is already being downloaded.");
+            return;
+        }
         output.replySuccess("Downloading **" + title + "** to your library, this may take a moment...");
 
-        bot.getThreadpool().submit(() ->
+        // Not the bot's scheduler: that is a single thread which also runs the now-playing
+        // updates and the alone-in-voice timer, and a download can take minutes.
+        DOWNLOADS.submit(() ->
         {
             try
             {
                 Path file = ytdlp.download(uri, library.getFolder());
                 library.ensureReady();
+                library.recordDownload(file);
+                library.cancelDeletion(file);
 
                 PlaylistLoader.PlaylistResult<PlaylistLoader.AppendIfAbsentResult> appendResult =
                         bot.getPlaylistLoader().appendItemIfAbsentResult(FAVORITES_PLAYLIST_NAME, file.toAbsolutePath().toString());
@@ -1039,7 +1111,8 @@ public class MusicService
                 }
                 else
                 {
-                    handler.markCurrentTrackFavorited(file.toAbsolutePath().toString());
+                    // Bound to the track that was downloaded; a no-op when another one plays now.
+                    handler.markTrackFavorited(uri, file.toAbsolutePath().toString());
                     output.editNowPlaying(handler);
                 }
                 LOG.info("Downloaded {} to the music library", file);
@@ -1055,6 +1128,10 @@ public class MusicService
                 {
                     // The channel may be gone.
                 }
+            }
+            finally
+            {
+                downloadsInFlight.remove(uri);
             }
         });
     }

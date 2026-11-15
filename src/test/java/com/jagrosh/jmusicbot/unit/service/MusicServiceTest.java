@@ -1488,6 +1488,90 @@ public class MusicServiceTest
             output.assertErrorMessageContains("misconfigured");
             output.assertErrorMessageContains("(not configured)");
         }
+
+        @Test
+        @DisplayName("unfavoriting the user's own library file keeps the file")
+        void toggleFavorite_keepsFileTheBotDidNotDownload(@org.junit.jupiter.api.io.TempDir java.nio.file.Path folder)
+                throws java.io.IOException
+        {
+            java.nio.file.Path own = java.nio.file.Files.writeString(folder.resolve("my-own-song.flac"), "audio");
+            com.jagrosh.jmusicbot.library.MusicLibrary library = favoritedLibraryTrack(folder, own, List.of("favorites"));
+
+            musicService.toggleCurrentTrackFavorite(fixture.getGuild(), fixture.getMember(), output);
+
+            verify(fixture.getPlaylistLoader()).removeItemIfPresentResult("favorites", own.toString());
+            assertTrue(java.nio.file.Files.exists(own), "only files the bot downloaded may be deleted");
+            assertFalse(library.isDownloaded(own));
+            output.assertSuccessMessage("Removed Title from Favorites");
+        }
+
+        @Test
+        @DisplayName("unfavoriting a downloaded track deletes the file and its sidecar")
+        void toggleFavorite_deletesDownloadedFile(@org.junit.jupiter.api.io.TempDir java.nio.file.Path folder)
+                throws java.io.IOException
+        {
+            java.nio.file.Path download = java.nio.file.Files.writeString(folder.resolve("download.flac"), "audio");
+            java.nio.file.Path sidecar = java.nio.file.Files.writeString(folder.resolve("download.info.json"), "{}");
+            com.jagrosh.jmusicbot.library.MusicLibrary library = favoritedLibraryTrack(folder, download, List.of("favorites"));
+            library.recordDownload(download);
+
+            musicService.toggleCurrentTrackFavorite(fixture.getGuild(), fixture.getMember(), output);
+
+            assertFalse(java.nio.file.Files.exists(download));
+            assertFalse(java.nio.file.Files.exists(sidecar));
+            assertFalse(library.isDownloaded(download));
+            output.assertSuccessMessage("Removed Title from Favorites and deleted the downloaded file");
+        }
+
+        @Test
+        @DisplayName("unfavoriting a downloaded track that another playlist uses keeps the file")
+        void toggleFavorite_keepsFileUsedByAnotherPlaylist(@org.junit.jupiter.api.io.TempDir java.nio.file.Path folder)
+                throws java.io.IOException
+        {
+            java.nio.file.Path download = java.nio.file.Files.writeString(folder.resolve("download.flac"), "audio");
+            com.jagrosh.jmusicbot.library.MusicLibrary library =
+                    favoritedLibraryTrack(folder, download, List.of("favorites", "mix"));
+            library.recordDownload(download);
+            // The other playlist spells the same file differently.
+            String otherSpelling = folder.resolve("sub").resolve("..").resolve("download.flac").toString();
+            com.jagrosh.jmusicbot.playlist.PlaylistLoader.Playlist mix =
+                    mock(com.jagrosh.jmusicbot.playlist.PlaylistLoader.Playlist.class);
+            when(mix.getItems()).thenReturn(List.of(otherSpelling));
+            when(fixture.getPlaylistLoader().getPlaylistResult("mix"))
+                    .thenReturn(com.jagrosh.jmusicbot.playlist.PlaylistLoader.PlaylistResult.success(mix));
+
+            musicService.toggleCurrentTrackFavorite(fixture.getGuild(), fixture.getMember(), output);
+
+            assertTrue(java.nio.file.Files.exists(download));
+            assertTrue(library.isDownloaded(download));
+            output.assertSuccessMessage("Removed Title from Favorites");
+        }
+
+        /**
+         * Sets up a playing library track that is in the favorites playlist.
+         */
+        private com.jagrosh.jmusicbot.library.MusicLibrary favoritedLibraryTrack(
+                java.nio.file.Path folder, java.nio.file.Path file, List<String> playlistNames)
+        {
+            fixture.withDJPermission()
+                    .withPlayingTrack();
+            String entry = file.toString();
+            AudioTrackInfo info = new AudioTrackInfo("Title", "Author", 180000L, "id", false, entry);
+            when(fixture.getCurrentTrack().getInfo()).thenReturn(info);
+
+            com.jagrosh.jmusicbot.library.MusicLibrary library = new com.jagrosh.jmusicbot.library.MusicLibrary(folder);
+            when(fixture.getBot().getMusicLibrary()).thenReturn(library);
+
+            com.jagrosh.jmusicbot.playlist.PlaylistLoader.Playlist favorites =
+                    mock(com.jagrosh.jmusicbot.playlist.PlaylistLoader.Playlist.class);
+            when(favorites.getItems()).thenReturn(List.of(entry));
+            when(fixture.getPlaylistLoader().getPlaylistResult("favorites"))
+                    .thenReturn(com.jagrosh.jmusicbot.playlist.PlaylistLoader.PlaylistResult.success(favorites));
+            when(fixture.getPlaylistLoader().removeItemIfPresentResult("favorites", entry))
+                    .thenReturn(com.jagrosh.jmusicbot.playlist.PlaylistLoader.PlaylistResult.success(true));
+            when(fixture.getPlaylistLoader().getPlaylistNames()).thenReturn(playlistNames);
+            return library;
+        }
     }
 
     // ==================== History Operation Tests ====================

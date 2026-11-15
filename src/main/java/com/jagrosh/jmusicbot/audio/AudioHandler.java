@@ -65,7 +65,10 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
     private AudioFrame lastFrame;
     private AbstractQueue<QueuedTrack> queue;
     private String lastReason = null;
-    private volatile String favoritedTrackUri = null;
+    /** The favorites entry of one track; it only counts while that track is the one playing. */
+    private record FavoriteMark(String trackUri, String entry) { }
+
+    private volatile FavoriteMark favoriteMark = null;
 
     protected AudioHandler(PlayerManager manager, Guild guild, AudioPlayer player)
     {
@@ -474,9 +477,28 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         return audioPlayer.isPaused() ? PAUSE_EMOJI : PLAY_EMOJI;
     }
 
-    public void markCurrentTrackFavorited(String uri)
+    /**
+     * Remembers the favorites entry of the track that is playing now.
+     *
+     * @param entry the favorites entry (a url or a library file), or null to clear it
+     */
+    public void markCurrentTrackFavorited(String entry)
     {
-        favoritedTrackUri = uri;
+        markTrackFavorited(currentTrackUri(), entry);
+    }
+
+    /**
+     * Remembers the favorites entry of a track, if that track is still the one playing. A
+     * download can finish after the next track started; its entry must not stick to that track.
+     *
+     * @param trackUri the uri of the track the entry belongs to
+     * @param entry the favorites entry, or null to clear it
+     */
+    public void markTrackFavorited(String trackUri, String entry)
+    {
+        if (trackUri == null || !trackUri.equals(currentTrackUri()))
+            return;
+        favoriteMark = entry == null ? null : new FavoriteMark(trackUri, entry);
     }
 
     /**
@@ -484,16 +506,19 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
      */
     public String getFavoritedTrackUri()
     {
-        return favoritedTrackUri;
+        FavoriteMark mark = favoriteMark;
+        return mark != null && mark.trackUri().equals(currentTrackUri()) ? mark.entry() : null;
     }
 
     public boolean isCurrentTrackFavorited()
     {
+        return getFavoritedTrackUri() != null;
+    }
+
+    private String currentTrackUri()
+    {
         AudioTrack currentTrack = audioPlayer.getPlayingTrack();
-        if (currentTrack == null || currentTrack.getInfo() == null)
-            return false;
-        String currentUri = currentTrack.getInfo().uri;
-        return currentUri != null && currentUri.equals(favoritedTrackUri);
+        return currentTrack == null || currentTrack.getInfo() == null ? null : currentTrack.getInfo().uri;
     }
     
     // Audio Send Handler methods

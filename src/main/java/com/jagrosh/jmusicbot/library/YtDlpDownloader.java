@@ -199,7 +199,10 @@ public class YtDlpDownloader
         // The output template must be absolute. yt-dlp runs with its own checkout as the
         // working directory, so a relative template would be resolved against that directory
         // and the tracks would land inside the yt-dlp checkout instead of the library.
-        Path outputTemplate = libraryFolder.toAbsolutePath().normalize().resolve("%(title)s.%(ext)s");
+        // The video id keeps two different videos with the same title in two files; without
+        // it the second download would overwrite the first, and unfavoriting one of them
+        // would delete the file of both.
+        Path outputTemplate = libraryFolder.toAbsolutePath().normalize().resolve("%(title).180B [%(id)s].%(ext)s");
         args.add(outputTemplate.toString());
         args.add(url);
 
@@ -285,7 +288,8 @@ public class YtDlpDownloader
         Path sourceSidecar = sidecarOf(absolute);
         if (sourceSidecar != null)
         {
-            Files.move(sourceSidecar, sidecarOf(target), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.move(sourceSidecar, library.resolve(sourceSidecar.getFileName()),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         }
 
         return target;
