@@ -1,5 +1,8 @@
-JMusicBot 0.7.0
-===============
+JMusicBot for Windows
+=====================
+
+This is the Windows package of the PonyWarrior fork of JMusicBot:
+https://github.com/PonyWarrior/MusicBot
 
 Requirements
 ------------
@@ -20,23 +23,26 @@ First run
 
 What is bundled
 ---------------
-JMusicBot-0.7.0-All.jar   the bot (all dependencies included)
-runtime\                  Java 25 runtime, with the VC++ DLLs the natives need
-javafx\                   JavaFX 25 modules for the web GUI window
-web\                      the Astryx web UI (built React app)
-config.txt                ready-to-run configuration (local cipher and library enabled)
-cipher\deno.exe           Deno 2.9.7, used by the cipher service
-cipher\yt-cipher\         local yt-cipher service (server.ts, src, ejs\src, docs)
+JMusicBot-<version>-All.jar   the bot, with all dependencies and the web UI inside
+runtime\                      Java 25 runtime
+javafx\                       JavaFX 25 modules for the web GUI window
+config.txt                    ready-to-run configuration (local cipher and library enabled)
+config.defaults               what the Reset buttons in the GUI go back to
+cipher\deno.exe               Deno, used by the cipher service
+cipher\yt-cipher\             local yt-cipher service (server.ts, src, ejs\src, docs)
 cipher\yt-cipher\deno-cache\  pre-downloaded Deno modules, so the cipher starts offline
-ytdlp\yt-dlp.exe          standalone yt-dlp, no Python needed
-ytdlp\ffmpeg.exe          ffmpeg, used for the audio conversion
-run.bat                   headless launcher
-run-gui.bat               web GUI launcher (no console window)
+ytdlp\yt-dlp.exe              standalone yt-dlp, no Python needed
+ytdlp\ffmpeg.exe              ffmpeg, used for the audio conversion
+run.bat                       headless launcher
+run-gui.bat                   web GUI launcher (no console window)
+LICENSE.txt                   licence of the bot (Apache 2.0)
+THIRD-PARTY-NOTICES.txt       versions, sources and licences of the bundled software
+licenses\                     the licence texts of the bundled software
 
 GUI
 ---
-run-gui.bat opens the Astryx web UI in a JavaFX window. Closing the window
-stops the bot, the cipher service and any running download.
+run-gui.bat opens the web UI in a JavaFX window. Closing the window stops the
+bot, the cipher service and any running download.
 Set gui.mode = "swing" in config.txt to use the legacy Swing window instead.
 
 YouTube playback
@@ -46,6 +52,10 @@ No Google account is needed. config.txt starts the bundled yt-cipher on
 modules the cipher needs are bundled in cipher\yt-cipher\deno-cache, so it
 starts without network access.
 
+If you prefer the public cipher server, set
+  playback.youtube.remoteCipher = "https://cipher.kikkia.dev/"
+and playback.youtube.localCipher.enabled = false.
+
 Local library and downloads
 ---------------------------
 The library is enabled and points at Music\ next to the jar. Put existing
@@ -53,9 +63,12 @@ audio files there (recursively), and favoriting a track downloads it with the
 bundled yt-dlp and converts it with the bundled ffmpeg. No Python or system
 ffmpeg is required.
 
-If you prefer the public cipher server, set
-  playback.youtube.remoteCipher = "https://cipher.kikkia.dev/"
-and playback.youtube.localCipher.enabled = false.
+Updating
+--------
+New versions are published at
+https://github.com/PonyWarrior/MusicBot/releases
+Extract the new package into a new folder and copy over what is yours:
+config.txt, serversettings.json, Music\ and Playlists\.
 
 Not supported
 -------------
