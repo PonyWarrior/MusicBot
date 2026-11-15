@@ -1,0 +1,179 @@
+name: Release
+
+# Publishes a release when a version tag is pushed, and at no other time.
+#
+#   1. set <version> in pom.xml, commit, push
+#   2. git tag v<version> && git push origin v<version>
+#
+# The tag has to match the version in pom.xml. Started by hand ("Run workflow"), the same
+# jobs build the same files as a dry run and publish nothing: the files are attached to the
+# run as artifacts instead.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build the jar
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Read the version
+        id: version
+        run: |
+          VERSION=$(mvn --batch-mode -q -DforceStdout help:evaluate -Dexpression=project.version)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version in pom.xml: $VERSION"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::The tag $GITHUB_REF_NAME does not match the version in pom.xml ($VERSION). Tag v$VERSION, or change pom.xml first."
+            exit 1
+          fi
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: webui/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      # The web UI is built first: Maven puts webui/dist into the jar.
+      - name: Check and build the web UI
+        working-directory: webui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm test
+          pnpm build
+
+      - name: Test and build the bot
+        run: |
+          COMMIT_TIME=$(git log -1 --format=%cI)
+          mvn --batch-mode verify -Dproject.build.outputTimestamp=$COMMIT_TIME
+
+      - name: Check that the jar contains the web UI
+        run: unzip -l "target/JMusicBot-${{ steps.version.outputs.version }}-All.jar" web/index.html
+
+      - name: Keep the jar
+        uses: actions/upload-artifact@v7
+        with:
+          name: jar
+          path: target/JMusicBot-${{ steps.version.outputs.version }}-All.jar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  windows:
+    name: Build the Windows package
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # bundle.ps1 builds the bundled Java runtime from this JDK with jlink.
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Fetch the jar
+        uses: actions/download-artifact@v8
+        with:
+          name: jar
+          path: ${{ runner.temp }}\jar
+
+      - name: Collect the bundled software
+        shell: pwsh
+        run: .\scripts\windows\bundle.ps1 -Output dist\bundle -Verify
+
+      # JMB_JAR: package the jar the first job tested, not a second build of it.
+      - name: Assemble the package
+        shell: cmd
+        run: |
+          for %%f in ("%RUNNER_TEMP%\jar\JMusicBot-*-All.jar") do set "JMB_JAR=%%~ff"
+          call scripts\windows\package.bat
+
+      - name: Keep the package
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-package
+          path: dist/JMusicBot-${{ needs.build.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    name: Publish the release
+    needs: [build, windows]
+    # A run started by hand stops before this job.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write  # creates the release
+    steps:
+      - name: Fetch the files
+        uses: actions/download-artifact@v8
+        with:
+          path: files
+          merge-multiple: true
+
+      - name: Write the checksums
+        working-directory: files
+        run: sha256sum JMusicBot-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Create the release
+        working-directory: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          cat > notes.md <<EOF
+          **Downloads**
+
+          - \`JMusicBot-$VERSION-windows-x64.zip\`: Windows 10/11 x64. Everything is included (Java runtime, the local YouTube cipher service, yt-dlp, ffmpeg). Extract it, set the token and owner in \`config.txt\`, run \`run-gui.bat\`.
+          - \`JMusicBot-$VERSION-All.jar\`: the bot alone, for any system with Java 25. The web UI is inside the jar; see the README for the rest of the setup.
+          - \`SHA256SUMS.txt\`: checksums of both files.
+
+          EOF
+          PRERELEASE=""
+          case "$VERSION" in *-*) PRERELEASE="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "JMusicBot $VERSION" \
+            --notes-file notes.md \
+            --generate-notes \
+            $PRERELEASE \
+            "JMusicBot-$VERSION-All.jar" \
+            "JMusicBot-$VERSION-windows-x64.zip" \
+            SHA256SUMS.txt

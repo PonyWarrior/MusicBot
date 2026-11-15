@@ -1,23 +1,13 @@
 name: Build and Test
 
-# Build and test on PRs and master pushes
-# This workflow does NOT publish Docker images - that's handled by docker-publish.yml
+# Builds and tests pull requests, and runs when started by hand ('Run workflow').
+# It does not run on pushes: nothing in this repository runs for every commit. Releases are
+# built by release.yml when a version tag is pushed.
 on:
   pull_request:
     branches:
       - master  # PRs targeting trunk
-  push:
-    branches:
-      - master  # Direct pushes to master
-    paths-ignore:
-      - '.github/**'  # Ignore GitHub config changes (workflows, actions, templates, etc.)
-      - 'README.md'
-      - 'LICENSE'
-      - 'CNAME'
-      - 'docs/**'
-      - '*.example.yml'
-      - '*.example.yaml'
-      - '.circleci/**'  # If not using CircleCI, ignore its config
+  workflow_dispatch:
 
 # Cancel in-progress runs for the same workflow and branch
 concurrency:
@@ -41,6 +31,27 @@ jobs:
           java-version: '25'
           distribution: 'temurin'
           cache: maven
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          package_json_file: webui/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
+
+      # The web UI is built first: Maven puts webui/dist into the jar.
+      - name: Check and build the web UI
+        working-directory: webui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm test
+          pnpm build
 
       - name: Build and Test with Coverage
         run: |

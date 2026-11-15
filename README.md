@@ -19,9 +19,19 @@ A cross-platform Discord music bot that is easy to set up and run yourself.
 | Local music library | Favoriting a track downloads it with yt-dlp (FLAC by default). Every play request and every search looks in the library first and plays from disk when it finds the track. |
 | Search | Results show the artist, the thumbnail and the source of every result, in both the slash command and the prefix command. |
 | Audio quality | Sample rate conversion runs at `high` quality by default (`performance.resamplingQuality`); lavaplayer's default is its coarsest filter. |
-| Desktop GUI | A web GUI (React 19 + Astryx) in a JavaFX window: now playing, queue, controls, logs, and every setting of `config.txt` as a form. The Swing window is still available. |
+| Desktop GUI | A web GUI (React 19 + Astryx) in a JavaFX window: now playing, queue, controls, logs, and every setting of `config.txt` as a form. It is inside the jar. The Swing window is still available. |
 | Logging | The bot writes `logs/jmusicbot.log` itself through an async rolling appender (20 MB per file, 7 days, 200 MB in total). |
-| Windows package | A script that assembles a self-contained zip: bundled Java runtime, JavaFX, Deno, yt-cipher, yt-dlp and ffmpeg. |
+| Windows package | A self-contained zip: bundled Java runtime, JavaFX, Deno, yt-cipher, yt-dlp and ffmpeg. |
+| Releases | Pushing a version tag builds the jar and the Windows package and publishes them. Nothing runs for ordinary commits. See [Releasing](#releasing). |
+
+## Download
+
+[Releases](https://github.com/PonyWarrior/MusicBot/releases) have two files:
+
+* `JMusicBot-<version>-windows-x64.zip` for Windows 10/11: extract it, put the bot token and your
+  Discord user id in `config.txt`, run `run-gui.bat`. Nothing else has to be installed.
+* `JMusicBot-<version>-All.jar` for any system with Java 25; the rest of this page describes how
+  to run it.
 
 ## Requirements
 
@@ -40,23 +50,26 @@ Optional, each for one feature:
 | Local cipher | [Deno](https://deno.com) 2.x and git |
 | Local library downloads | Python 3.9+ with a yt-dlp checkout (or a standalone `yt-dlp` binary), and ffmpeg on the `PATH` |
 | Web GUI | The JavaFX 25 modules on the module path. The build pulls the **Windows** JavaFX jars; on other systems the bot falls back to the Swing window, or runs headless. |
-| Building the web GUI | Node.js and [pnpm](https://pnpm.io) |
+| Building the web GUI | Node.js 24 and [pnpm](https://pnpm.io) 11 |
 
 ## Building
 
-```bash
-mvn -B package          # unit tests + target/JMusicBot-0.7.0-All.jar
-mvn -B verify           # unit and integration tests
-mvn -B verify -Pcoverage  # what CI runs
-```
-
-The web GUI is a separate build:
+Build the web GUI first: Maven puts `webui/dist` into the jar as it packages.
 
 ```bash
 cd webui
 pnpm install --frozen-lockfile
-pnpm build              # output in webui/dist
+pnpm lint && pnpm test    # ESLint, and the unit tests (Node's built-in runner)
+pnpm build                # type check + output in webui/dist
+cd ..
+
+mvn -B package            # unit tests + target/JMusicBot-<version>-All.jar
+mvn -B verify             # unit and integration tests
+mvn -B verify -Pcoverage  # what the pull request check runs
 ```
+
+A jar built without `webui/dist` works too, without the web GUI: it logs that the build does not
+contain it and opens the Swing window.
 
 ## Running
 
@@ -67,7 +80,7 @@ writes a default file; put the bot token and your Discord user id (`discord.owne
 
 ```bash
 java -Dfile.encoding=UTF-8 -Dnogui=true --enable-native-access=ALL-UNNAMED \
-     -XX:+UseZGC -XX:+AlwaysPreTouch -jar target/JMusicBot-0.7.0-All.jar
+     -XX:+UseZGC -XX:+AlwaysPreTouch -jar target/JMusicBot-<version>-All.jar
 ```
 
 In PowerShell, quote each option that starts with `-D`
@@ -83,15 +96,15 @@ In PowerShell, quote each option that starts with `-D`
 
 ### With the web GUI (Windows)
 
-The JavaFX jars are not inside the bot's jar. Copy them next to the checkout once, build the web
-UI, then start the bot with them on the module path:
+The JavaFX jars are not inside the bot's jar. Copy them next to the checkout once, then start the
+bot with them on the module path:
 
 ```bat
 mvn -q dependency:copy-dependencies -DincludeGroupIds=org.openjfx -DincludeClassifiers=win -DoutputDirectory=javafx
 
 java --module-path javafx --add-modules javafx.controls,javafx.web ^
      -Dfile.encoding=UTF-8 --enable-native-access=ALL-UNNAMED,javafx.graphics ^
-     -XX:+UseZGC -XX:+AlwaysPreTouch -jar target\JMusicBot-0.7.0-All.jar
+     -XX:+UseZGC -XX:+AlwaysPreTouch -jar target\JMusicBot-<version>-All.jar
 ```
 
 Closing the window shuts the bot down, including the cipher service and a running download.
@@ -196,63 +209,97 @@ folder instead of on the `PATH`.
 
 ## Web GUI
 
-The bot serves the built web UI and a small JSON API on `127.0.0.1`, on a free port, and opens it
-in a JavaFX WebView. It looks for the UI in `webui/dist` of the working directory, then `web/`
-there, then next to the jar.
+The bot serves the web UI and a small JSON API on `127.0.0.1`, on a free port, and opens it in a
+JavaFX WebView. The UI comes from the jar. A `webui/dist` folder in the working directory, or in
+the checkout the jar was built in, is served instead, so a rebuilt UI shows up without
+repackaging the jar.
 
-* **Dashboard:** now playing with progress, play/pause, skip, previous, favorite, shuffle,
-  repeat, stop, volume, the queue, status and the log.
-* **Advanced:** every setting of `config.txt` as a field with a per-section reset, performance
-  figures, history and the full log. Saving rewrites only the changed values in `config.txt`
-  (comments are kept) and offers a restart, which the new values need.
+* **Dashboard:** now playing with a position slider that seeks, play/pause, skip, previous,
+  favorite, shuffle, repeat, stop, volume, the queue, status and the log. A live stream shows as
+  `LIVE` with the time it has been playing.
+* **Advanced:** every setting of `config.txt` as a field with its description, a filter, a
+  per-section reset, performance figures, history and the full log. Saving rewrites only the
+  changed values in `config.txt` (comments are kept) and offers a restart, which the new values
+  need.
+* Stop and Restart ask first. Restart offers to save unsaved settings.
 * Light and dark mode; the choice is kept in `gui-theme.txt` and the window's title bar follows.
+* When the bot stops answering, the page says so and keeps trying.
 
 The server only answers requests whose `Host` (and `Origin`, for writes) name that loopback
 address, so a web page cannot reach it by pointing a domain at 127.0.0.1. Only keys that exist in
 the bot's configuration can be written. The bot token is write-only: the page never receives it,
-and an empty token field means "keep the current one".
+and an empty token field means "keep the current one". Every response carries a
+`Content-Security-Policy` that lets the page load scripts and data from the bot only.
 
 The API is not authenticated beyond that: any program running as the same user can call it,
 including the settings that name commands to run. Do not expose the port.
 
 ## Windows package
 
-`scripts\windows\package.bat` tests and builds the jar, builds the web UI and zips a folder that
-runs on a machine with nothing installed. It does not download the bundled programs; put them in
-place once:
-
-```
-dist\JMusicBot-0.7.0\
-├── runtime\             a Java 25 runtime (see below)
-├── javafx\              the five javafx-*-win.jar files (the mvn command above)
-├── cipher\deno.exe
-├── cipher\yt-cipher\    a checkout made by setup-cipher.ps1 (server.ts, src\, ejs\, ...)
-├── ytdlp\yt-dlp.exe     the standalone yt-dlp
-└── ytdlp\ffmpeg.exe
-```
-
-A runtime with the modules the bot uses:
+The zip of a [release](https://github.com/PonyWarrior/MusicBot/releases) runs on a machine with
+nothing installed. Two scripts build it; both need `JAVA_HOME` pointing at a JDK 25 and `mvn`,
+`pnpm` and `git` on the `PATH`.
 
 ```bat
-jlink --no-header-files --no-man-pages --strip-debug --output dist\JMusicBot-0.7.0\runtime ^
-  --add-modules java.base,java.compiler,java.datatransfer,java.xml,java.prefs,java.desktop,java.logging,java.management,java.security.sasl,java.naming,java.net.http,java.scripting,java.security.jgss,java.transaction.xa,java.sql,jdk.crypto.ec,jdk.httpserver,jdk.jsobject,jdk.localedata,jdk.management,jdk.unsupported,jdk.xml.dom,jdk.zipfs
-```
-
-The package's `config.txt` sets `DENO_DIR = "deno-cache"` for the cipher service, so Deno keeps
-its modules in `cipher\yt-cipher\deno-cache`. Start the service once from that folder before
-packaging if the package should work without downloading them on its first start.
-
-Then, with `JAVA_HOME` pointing at a JDK 25 and `mvn` and `pnpm` on the `PATH`:
-
-```bat
+powershell -ExecutionPolicy Bypass -File scripts\windows\bundle.ps1
 scripts\windows\package.bat
 ```
 
-The launchers, `README.txt` and `config.txt` of the package come from
-[`scripts/windows/package/`](scripts/windows/package) on every run, and the script refuses to
-continue if that `config.txt` holds anything but the placeholder token. Logs, playlists, the
-library and other runtime files are removed from the folder before it is zipped. Set `JMB_DIST`
-to build the package somewhere other than `dist\`.
+`bundle.ps1` collects the third-party parts in `dist\bundle\`, once. A part that is already there
+is skipped; `-Force` rebuilds them, and `-Verify` starts the bundled cipher service to check it.
+
+```
+dist\bundle\
+├── runtime\             a Java runtime made with jlink from the JDK at JAVA_HOME
+├── javafx\              the five javafx-*-win.jar files, in the version the pom names
+├── cipher\deno.exe      Deno (-DenoVersion)
+├── cipher\yt-cipher\    yt-cipher and its solver, with the Deno modules it needs in deno-cache\
+├── ytdlp\yt-dlp.exe     the standalone yt-dlp (-YtDlpVersion, default latest)
+├── ytdlp\ffmpeg.exe     FFmpeg, gyan.dev "essentials" build (-FfmpegVersion)
+├── licenses\            licence texts of all of the above
+└── THIRD-PARTY-NOTICES.txt
+```
+
+`package.bat` builds the web UI, tests and builds the jar, then assembles
+`dist\JMusicBot-<version>\` from scratch (the bundle, the jar, and the launchers, `README.txt`
+and `config.txt` from [`scripts/windows/package/`](scripts/windows/package)) and zips it as
+`dist\JMusicBot-<version>-windows-x64.zip`. The version is the one in `pom.xml`. The script
+refuses to continue if that `config.txt` holds anything but the placeholder token, or if the jar
+does not contain the web UI. `package.bat skipWeb` keeps the web build already in `webui\dist`;
+set `JMB_DIST` to build somewhere other than `dist\`, and `JMB_JAR` to package a jar that is
+already built.
+
+The package's `config.txt` sets `DENO_DIR = "deno-cache"` for the cipher service, so it starts
+without downloading anything.
+
+> [!NOTE]
+> The zip redistributes other people's programs under their own licences, listed in
+> `THIRD-PARTY-NOTICES.txt`. The FFmpeg build is GPL v3. yt-cipher and one of its dependencies
+> state no licence at the time of writing.
+
+## Releasing
+
+Nothing in this repository runs for ordinary commits. A release is built when, and only when, a
+version tag is pushed:
+
+```bash
+# 1. set the new <version> in pom.xml, commit and push it
+# 2. tag that commit and push the tag
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+The [Release workflow](.github/workflows/release.yml) then checks and builds the web UI, runs
+the unit and integration tests, builds the jar, builds the Windows package on a Windows runner,
+and publishes a release with both files and their SHA-256 checksums. The tag has to be
+`v` + the version in `pom.xml`; any other tag fails before anything is built. A version with a
+hyphen (`1.3.0-rc1`) is published as a pre-release.
+
+To try it without publishing, start the workflow by hand (Actions → Release → Run workflow): it
+builds the same files and attaches them to the run instead.
+
+The other workflows run only for pull requests (`Build and Test`) or by hand
+(`Publish Docker Image`, `Publish Preview Image`).
 
 ## Docker
 
@@ -266,7 +313,7 @@ docker run --rm -it -v "/path/to/musicbot:/musicbot" jmusicbot
 `/musicbot` is the working directory: `config.txt`, `Playlists/` and `serversettings.json` live
 there, and a default `config.txt` is written on the first run. The image has no Deno, Python or
 ffmpeg, so the local cipher and the library downloads are not available in it; the default remote
-cipher works. This fork does not publish images; the upstream ones at
+cipher works. The image has no web GUI. This fork does not publish images; the upstream ones at
 `ghcr.io/arif-banai/musicbot` do not contain the changes described here.
 
 ## Performance tuning
@@ -302,7 +349,8 @@ Leave `host` empty or `port` at 0 to disable it. HTTP proxies only.
 ```
 src/                 the bot (Java)
 webui/               the web GUI (React, TypeScript, Vite)
-scripts/windows/     setup-cipher.ps1, setup-ytdlp.ps1, package.bat and the package files
+scripts/windows/     setup-cipher.ps1, setup-ytdlp.ps1, bundle.ps1, package.bat and the package files
+.github/workflows/   release on a version tag; checks for pull requests
 docker/, Dockerfile  the headless image
 docs/                architecture, development workflow, YouTube playback notes
 ```
@@ -316,6 +364,7 @@ keeps the library's copy out of the jar.
 Branch names and the workflow follow upstream; see
 [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md). Unit tests live under
 `src/test/java/.../unit/` and run with `mvn test`; a test outside that folder is not picked up.
+The web UI's tests are in `webui/test/` (`pnpm test`).
 
 Problems with what this fork adds belong in this repository. For the bot itself, please use
 [upstream's issues and discussions](https://github.com/arif-banai/MusicBot/issues).

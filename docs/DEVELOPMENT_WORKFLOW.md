@@ -1,4 +1,4 @@
-﻿# Development Workflow
+# Development Workflow
 
 This project follows a **trunk-based development** workflow. This document outlines the branch strategy, development practices, and CI/CD processes.
 
@@ -120,27 +120,30 @@ The `validate-branch-naming.yml` workflow automatically validates branch names o
 ### Build and Test
 
 The `build-and-test.yml` workflow runs on:
-- Pushes to `master` and all short-lived branches
 - Pull requests targeting `master`
+- A manual start ("Run workflow")
+
+It does **not** run on pushes. Nothing in this fork runs for every commit.
 
 **What it does:**
+- Checks and builds the web UI (`pnpm lint`, `pnpm test`, `pnpm build`)
 - Compiles the project
 - Runs unit and integration tests
 - Generates code coverage reports
 - Uploads coverage to Codecov
 
+### Release
+
+The `release.yml` workflow runs when a version tag (`v*`) is pushed. It tests and builds the jar
+(with the web UI inside), builds the Windows package and publishes a GitHub release with both.
+Started by hand it does the same as a dry run and publishes nothing.
+
 ### Docker Build
 
-The `docker-build.yml` workflow builds and publishes Docker images on:
-- Pushes to `master` ΓåÆ tags as `:latest` and version (if not SNAPSHOT)
-- Pushes to short-lived branches ΓåÆ tags as `:<branch-name>` (e.g., `:feature-new-player-ui`)
-- Version tags (e.g., `v0.6.3`) ΓåÆ tags as `:0.6.3`
-
-**Image tags:**
-- `master`: `ghcr.io/arif-banai/musicbot:latest` (+ version tag if applicable)
-- Feature branch: `ghcr.io/arif-banai/musicbot:feature-new-player-ui`
-- Version tag: `ghcr.io/arif-banai/musicbot:0.6.3`
-
+The `docker-publish.yml` workflow builds and publishes the headless Docker image of the ref it is
+started on. It only runs when started by hand:
+- On a version tag (e.g., `v0.6.3`): tags the image as `:0.6.3`
+- On `master`: tags the image as `:latest` and version (if not SNAPSHOT)
 ## Best Practices
 
 ### Keep Branches Short-Lived
@@ -195,13 +198,12 @@ The `docker-build.yml` workflow builds and publishes Docker images on:
    git push origin v0.6.3
    ```
 
-4. **Use "Make Release" workflow** (optional)
-   - Or manually create GitHub release
-   - Attach JAR file from workflow artifacts
+4. **The "Release" workflow runs for the tag**
+   - It fails early when the tag is not `v` + the version in `pom.xml`
+   - It publishes the GitHub release with the jar, the Windows package and their checksums
 
-5. **Docker image is automatically built** from the tag
-   - Tagged as `ghcr.io/arif-banai/musicbot:0.6.3`
-
+5. **Docker image** (optional)
+   - Start "Publish Docker Image" by hand on the tag
 ### Release Branch (for stabilization)
 
 Only use if you need to stabilize a release while continuing development:
