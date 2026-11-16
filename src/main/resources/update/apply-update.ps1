@@ -22,16 +22,19 @@ $launcher = $env:JMB_LAUNCHER
 $updateDir = $env:JMB_UPDATE_DIR
 $backupDir = Join-Path $updateDir 'backup'
 $logFile = Join-Path $updateDir 'apply-update.log'
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 function Write-Log([string]$message)
 {
     $line = '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $message
-    Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
+    # UTF-8 without a byte-order mark: -Encoding UTF8 in Windows PowerShell writes one, and the
+    # bot then logs it as text.
+    [System.IO.File]::AppendAllText($logFile, $line + "`r`n", $utf8NoBom)
 }
 
 function Write-Result([string]$message)
 {
-    Set-Content -LiteralPath (Join-Path $updateDir 'result.txt') -Value $message -Encoding UTF8
+    [System.IO.File]::WriteAllText((Join-Path $updateDir 'result.txt'), $message, $utf8NoBom)
     Write-Log $message
 }
 
@@ -43,8 +46,33 @@ function Remove-Markers
     }
 }
 
+function Wait-ProcessExit([int]$processId, [int]$seconds)
+{
+    # Polls instead of Wait-Process: Wait-Process can fail at once on a process it did not start
+    # (seen live: it returned after one second with the bot still alive).
+    $deadline = (Get-Date).AddSeconds($seconds)
+    while (Get-Process -Id $processId -ErrorAction SilentlyContinue)
+    {
+        if ((Get-Date) -ge $deadline) { return $false }
+        Start-Sleep -Milliseconds 500
+    }
+    return $true
+}
+
+function Wait-BotExit([int]$seconds)
+{
+    return (Wait-ProcessExit $botPid $seconds)
+}
+
 function Start-Bot
 {
+    # Never start a second instance while the old one still holds the single-instance lock: it
+    # would stop at the "already running" dialog and never exit.
+    if (-not (Wait-BotExit 120))
+    {
+        Write-Log "not restarting: the old bot (process $botPid) is still running"
+        return
+    }
     Start-Process -FilePath $launcher -WorkingDirectory $appDir -WindowStyle Hidden | Out-Null
 }
 
@@ -59,14 +87,9 @@ try
     if (-not (Test-Path -LiteralPath $newJar -PathType Leaf)) { throw "the new jar is missing: $newJar" }
 
     # 1. Wait for the old bot to exit, so its jar is no longer locked.
-    $old = Get-Process -Id $botPid -ErrorAction SilentlyContinue
-    if ($old)
+    if (-not (Wait-BotExit 120))
     {
-        $old | Wait-Process -Timeout 120 -ErrorAction SilentlyContinue
-        if (Get-Process -Id $botPid -ErrorAction SilentlyContinue)
-        {
-            throw "the bot (process $botPid) did not exit within 120 seconds"
-        }
+        throw "the bot (process $botPid) did not exit within 120 seconds"
     }
 
     # 2. Move every current jar out of the launcher's glob.
@@ -112,11 +135,10 @@ try
     if (Test-Path -LiteralPath $startedFile)
     {
         $newPid = [int](Get-Content -LiteralPath $startedFile | Select-Object -First 1)
-        $newProcess = Get-Process -Id $newPid -ErrorAction SilentlyContinue
-        if ($newProcess)
+        if (Get-Process -Id $newPid -ErrorAction SilentlyContinue)
         {
             Stop-Process -Id $newPid -Force -ErrorAction SilentlyContinue
-            $newProcess | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
+            [void](Wait-ProcessExit $newPid 30)
         }
     }
     # A jar that is still locked must not abort the rollback: restoring the old jar matters more.

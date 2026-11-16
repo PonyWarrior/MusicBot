@@ -251,7 +251,9 @@ public class UpdateManager
             Path result = dir.resolve("result.txt");
             if (Files.isRegularFile(result))
             {
-                LOG.info("Last bot update: {}", Files.readString(result, StandardCharsets.UTF_8).trim());
+                // Older update scripts wrote the file with a byte-order mark.
+                String text = Files.readString(result, StandardCharsets.UTF_8).replace("﻿", "").trim();
+                LOG.info("Last bot update: {}", text);
                 Files.delete(result);
             }
         }
