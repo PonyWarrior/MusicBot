@@ -49,6 +49,8 @@ public class NowPlayingHandler
         private boolean pending;
         private boolean forceNewMessage;
         private NPLocation location;
+        // The tracked message already shows "No music playing"; skip re-editing it.
+        private NPLocation idleLocation;
     }
 
     private final Bot bot;
@@ -201,14 +203,16 @@ public class NowPlayingHandler
 
         NPLocation loc;
         boolean forceNewMessage;
+        boolean alreadyIdle;
         synchronized (state)
         {
             loc = state.location;
             forceNewMessage = state.forceNewMessage;
             state.forceNewMessage = false;
+            alreadyIdle = loc != null && loc.equals(state.idleLocation);
         }
 
-        if (!isPlaying && loc == null)
+        if (!isPlaying && (loc == null || alreadyIdle))
         {
             finishReconcile(guildId, reconcileVersion);
             return;
@@ -247,19 +251,18 @@ public class NowPlayingHandler
             return;
         }
 
-        boolean clearOnSuccess = !isPlaying;
+        // The idle card stays tracked, so the next track start deletes it instead of leaving a
+        // dead "No music playing" message with buttons behind in the channel.
+        NPLocation editedLocation = loc;
         tc.editMessageById(loc.messageId(), asEditData(targetMsg)).queue(
                 success -> {
-                    if (clearOnSuccess)
+                    GuildState currentState = guildStates.get(guildId);
+                    if (currentState != null)
                     {
-                        GuildState currentState = guildStates.get(guildId);
-                        if (currentState != null)
+                        synchronized (currentState)
                         {
-                            synchronized (currentState)
-                            {
-                                if (currentState.version == reconcileVersion)
-                                    currentState.location = null;
-                            }
+                            if (editedLocation.equals(currentState.location))
+                                currentState.idleLocation = isPlaying ? null : editedLocation;
                         }
                     }
                     finishReconcile(guildId, reconcileVersion);

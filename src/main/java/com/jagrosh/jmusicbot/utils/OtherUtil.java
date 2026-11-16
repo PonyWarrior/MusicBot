@@ -18,6 +18,7 @@ package com.jagrosh.jmusicbot.utils;
 import com.jagrosh.jmusicbot.JMusicBot;
 import com.jagrosh.jmusicbot.entities.UserInteraction;
 import com.jagrosh.jmusicbot.entities.UserInteraction.Level;
+import com.jagrosh.jmusicbot.update.UpdateSupport;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.OnlineStatus;
 import net.dv8tion.jda.api.entities.Activity;
@@ -336,37 +337,17 @@ public class OtherUtil
         if (current.equalsIgnoreCase("UNKNOWN"))
             return true;
 
-        String[] currentParts = current.split("\\.");
-        String[] latestParts = latest.split("\\.");
-        int length = Math.max(currentParts.length, latestParts.length);
-
-        for (int i = 0; i < length; i++)
-        {
-            int curr = i < currentParts.length ? numericPart(currentParts[i]) : 0;
-            int late = i < latestParts.length ? numericPart(latestParts[i]) : 0;
-
-            if (late > curr) return true;
-            if (late < curr) return false;
-        }
-        return false;
+        // Same rules as the updater, so 0.8.6-beta.1 is told about 0.8.6. A "-RELEASE" suffix
+        // (older version strings) marks a final release, not a prerelease.
+        return UpdateSupport.compareVersions(stripReleaseSuffix(latest), stripReleaseSuffix(current)) > 0;
     }
 
-    /**
-     * The digits of one version part, or 0 when it has none (for example "RELEASE").
-     */
-    private static int numericPart(String part)
+    private static String stripReleaseSuffix(String version)
     {
-        String digits = part.replaceAll("\\D", "");
-        if (digits.isEmpty())
-            return 0;
-        try
-        {
-            return Integer.parseInt(digits);
-        }
-        catch (NumberFormatException e)
-        {
-            return Integer.MAX_VALUE;
-        }
+        String value = version.trim();
+        return value.toUpperCase(java.util.Locale.ROOT).endsWith("-RELEASE")
+                ? value.substring(0, value.length() - "-RELEASE".length())
+                : value;
     }
 
     /**

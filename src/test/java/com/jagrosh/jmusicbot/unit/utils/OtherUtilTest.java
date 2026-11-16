@@ -85,7 +85,14 @@ public class OtherUtilTest
                 // Edge cases
                 Arguments.of("UNKNOWN", "0.5.1", true, "Unknown version should prompt update"),
                 Arguments.of("0.5.1-RELEASE", "0.5.1", false, "Handles non-numeric suffixes (equal)"),
-                Arguments.of("0.5.1", "0.5.2-BETA", true, "Handles suffixes in latest (newer)")
+                Arguments.of("0.5.1", "0.5.2-BETA", true, "Handles suffixes in latest (newer)"),
+
+                // Prereleases
+                Arguments.of("0.8.6-beta.1", "0.8.6", true, "Release is newer than its own prerelease"),
+                Arguments.of("0.8.6-beta.1", "0.8.6-beta.2", true, "Later prerelease is newer"),
+                Arguments.of("0.8.6", "0.8.6-beta.2", false, "Prerelease is older than its release"),
+                Arguments.of("0.8.6-beta.2", "0.8.6-beta.1", false, "Earlier prerelease is older"),
+                Arguments.of("0.8.5", "v0.8.6-beta.1", true, "Leading v and next prerelease")
         );
     }
 

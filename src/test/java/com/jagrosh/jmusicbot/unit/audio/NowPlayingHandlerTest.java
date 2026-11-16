@@ -348,6 +348,48 @@ public class NowPlayingHandlerTest
             verify(fixture.getTextChannel()).editMessageById(eq(999999L), any(MessageEditData.class));
             verify(fixture.getTextChannel(), never()).editMessageById(eq(MESSAGE_ID), any(MessageEditData.class));
         }
+
+        @Test
+        @DisplayName("idle card stays tracked and is replaced when the next track starts")
+        void idleCard_isDeletedWhenNextTrackStarts()
+        {
+            // Given - every send and edit completes immediately
+            AudioTrack track = fixture.createMockTrack("Race Song", "Artist", 180000);
+            RequestMetadata metadata = new RequestMetadata(null,
+                    new RequestMetadata.RequestInfo("song", "https://example.com/song"),
+                    CHANNEL_ID);
+            when(track.getUserData(RequestMetadata.class)).thenReturn(metadata);
+            when(audioHandler.getNowPlaying(fixture.getJda())).thenReturn(createNowPlayingMessage());
+            when(audioHandler.getNoMusicPlaying(fixture.getJda())).thenReturn(createNowPlayingMessage());
+            doAnswer(invocation -> {
+                Consumer<Message> success = invocation.getArgument(0);
+                success.accept(fixture.getMessage());
+                return null;
+            }).when(fixture.getMessageCreateAction()).queue(any(), any());
+            doAnswer(invocation -> {
+                Consumer<Message> success = invocation.getArgument(0);
+                success.accept(fixture.getMessage());
+                return null;
+            }).when(fixture.getMessageEditAction()).queue(any(), any());
+
+            // When - a track plays, the queue empties, the periodic refresh runs, a new track starts
+            when(fixture.getAudioPlayer().getPlayingTrack()).thenReturn(track);
+            nowPlayingHandler.onTrackUpdate(GUILD_ID, track);
+
+            when(fixture.getAudioPlayer().getPlayingTrack()).thenReturn(null);
+            when(audioHandler.getNowPlaying(fixture.getJda())).thenReturn(null);
+            nowPlayingHandler.onTrackUpdate(GUILD_ID, null);
+            nowPlayingHandler.requestReconcile(GUILD_ID, "periodic");
+
+            when(fixture.getAudioPlayer().getPlayingTrack()).thenReturn(track);
+            when(audioHandler.getNowPlaying(fixture.getJda())).thenReturn(createNowPlayingMessage());
+            nowPlayingHandler.onTrackUpdate(GUILD_ID, track);
+
+            // Then - the idle card was edited once, then deleted when the new card was sent
+            verify(fixture.getTextChannel(), times(1)).editMessageById(eq(MESSAGE_ID), any(MessageEditData.class));
+            verify(fixture.getTextChannel()).deleteMessageById(MESSAGE_ID);
+            verify(fixture.getTextChannel(), times(2)).sendMessage(any(MessageCreateData.class));
+        }
     }
 
     // ==================== Edge Case Tests ====================
