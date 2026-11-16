@@ -106,7 +106,10 @@ function UpdatesCard({ visible }: Props) {
                       onClick={() => start('update', component.id)}
                     />
                   ) : (
-                    <Badge variant="neutral" label={component.note ?? (component.latest ? 'up to date' : 'not checked')} />
+                    // The row is a flex line and the badge may shrink to nothing, so keep its width.
+                    <span className="queue-action">
+                      <Badge variant="neutral" label={component.note ?? (component.latest ? 'up to date' : 'not checked')} />
+                    </span>
                   )}
                 </div>
               ))}

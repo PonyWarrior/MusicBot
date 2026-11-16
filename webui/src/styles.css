@@ -186,6 +186,26 @@ body {
   white-space: nowrap;
 }
 
+.queue-action {
+  flex: none;
+}
+
+.settings-savebar {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border-emphasized, #b8bcc4);
+  border-radius: 10px;
+  background: var(--color-background-surface, #fff);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
+}
+
 .log {
   margin: 0;
   padding: 12px;

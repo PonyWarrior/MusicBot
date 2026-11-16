@@ -325,6 +325,23 @@ function SettingsPanel({ restart, handle }: Props) {
             </VStack>
           </Card>
         ))}
+
+        {/* The header's Save button scrolls away with long sections, so pin a copy to the
+            bottom of the view while there is something to save. */}
+        {dirtyKeys.length > 0 && (
+          <div className="settings-savebar">
+            <Text size="sm">{unsaved}</Text>
+            <div className="settings-actions">
+              <Button label="Discard changes" variant="secondary" onClick={discard} />
+              <Button
+                type="submit"
+                label={saving ? 'Saving…' : 'Save'}
+                variant="primary"
+                isDisabled={saving}
+              />
+            </div>
+          </div>
+        )}
       </VStack>
     </form>
   );
