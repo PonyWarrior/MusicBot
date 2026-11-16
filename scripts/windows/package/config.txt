@@ -260,6 +260,12 @@ paths {
 updates {
   # If true, the bot will DM the owner when a new version is available.
   alerts = true
+
+  # If true, updates are installed automatically while nothing is playing.
+  auto = false
+
+  # If true, pre-release (beta) versions of the bot are offered too.
+  beta = false
 }
 
 logging {

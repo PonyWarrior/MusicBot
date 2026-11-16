@@ -39,7 +39,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.event.inputs.ref }}
           fetch-depth: 0  # Full history needed for git commands
@@ -60,7 +60,7 @@ jobs:
       - name: Set up Java Environment
         # Run if run_tests is true (default) or explicitly set to true
         if: ${{ github.event.inputs.run_tests != 'false' }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           java-version: '25'
           distribution: 'temurin'
@@ -97,7 +97,7 @@ jobs:
 
       - name: Generate Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         env:
           # For multi-arch images, annotations must be attached to the image index
           # GitHub Packages reads annotations from the index level for multi-arch images

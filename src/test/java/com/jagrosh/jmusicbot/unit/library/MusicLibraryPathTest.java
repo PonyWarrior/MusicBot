@@ -65,4 +65,27 @@ class MusicLibraryPathTest
         assertTrue(library.findTrack("Some Song").isPresent(),
                 "A track in the library folder must be found");
     }
+
+    @Test
+    @DisplayName("Part of a word does not match a track")
+    void partialWordDoesNotMatch(@TempDir Path folder) throws Exception
+    {
+        Files.write(folder.resolve("Party Anthem.flac"), new byte[] { 'f', 'L', 'a', 'C' });
+        MusicLibrary library = new MusicLibrary(folder);
+
+        assertFalse(library.findTrack("art").isPresent());
+        assertFalse(library.findTrack("a").isPresent());
+        assertTrue(library.findTrack("party").isPresent());
+        assertTrue(library.findTrack("anthem").isPresent());
+        assertTrue(library.findTrack("anthem party").isPresent());
+    }
+
+    @Test
+    @DisplayName("Whole-word phrase checks")
+    void containsPhraseMatchesWholeWords()
+    {
+        assertTrue(MusicLibrary.containsPhrase("some artist some song", "some song"));
+        assertFalse(MusicLibrary.containsPhrase("some artist some songs", "some song"));
+        assertFalse(MusicLibrary.containsPhrase("anything", ""));
+    }
 }

@@ -64,6 +64,51 @@ class PlaylistLoaderTest
     }
 
     @Test
+    @DisplayName("isValidPlaylistName() accepts plain names")
+    void isValidPlaylistName_acceptsPlainNames()
+    {
+        for(String name : List.of("favorites", "My Mix", "rock_2024", "a-b", "été", "x.y"))
+            assertTrue(PlaylistLoader.isValidPlaylistName(name), name);
+    }
+
+    @Test
+    @DisplayName("isValidPlaylistName() rejects paths, device names and junk")
+    void isValidPlaylistName_rejectsUnsafeNames()
+    {
+        List<String> bad = new ArrayList<>(List.of("", " lead", "trail ", "dot.", "..", "../x", "..\\x",
+                "a/b", "a\\b", "C:x", "C:\\Windows\\win", "a*b", "a?b", "a\"b", "a<b", "a>b", "a|b",
+                "CON", "con", "nul.txt", "COM1", "lpt9", "tab\there", "\u0000", "a".repeat(101)));
+        bad.add(null);
+        for(String name : bad)
+            assertFalse(PlaylistLoader.isValidPlaylistName(name), String.valueOf(name));
+    }
+
+    @Test
+    @DisplayName("traversal names are refused and no file is touched outside the folder")
+    void traversalNames_areRefused() throws IOException
+    {
+        Path outside = tempDir.getParent().resolve("outside-" + System.nanoTime() + ".txt");
+        Files.writeString(outside, "secret\n");
+        try
+        {
+            String escape = "../" + outside.getFileName().toString().replace(".txt", "");
+
+            PlaylistLoader.PlaylistResult<PlaylistLoader.Playlist> read = loader.getPlaylistResult(escape);
+            assertFalse(read.isSuccess());
+            assertEquals(PlaylistLoader.PlaylistErrorType.INVALID_NAME, read.getError().getType());
+
+            assertFalse(loader.deletePlaylistResult(escape).isSuccess());
+            assertFalse(loader.writePlaylistResult(escape, "pwned").isSuccess());
+            assertFalse(loader.createPlaylistResult(escape).isSuccess());
+            assertEquals("secret\n", Files.readString(outside));
+        }
+        finally
+        {
+            Files.deleteIfExists(outside);
+        }
+    }
+
+    @Test
     @DisplayName("loadTracks() invokes callback only after all items complete")
     void loadTracks_invokesCallbackOnlyAfterAllItemsComplete() throws IOException
     {
@@ -341,5 +386,19 @@ class PlaylistLoaderTest
         assertTrue(result.isSuccess());
         assertFalse(result.getValue());
         assertEquals(List.of("a"), Files.readAllLines(favorites));
+    }
+
+    @Test
+    @DisplayName("removeItemIfPresentResult keeps comments, blank lines, #shuffle and CRLF")
+    void removeItemIfPresentResult_keepsCommentsAndDirectives() throws IOException
+    {
+        Path playlist = tempDir.resolve("mix.txt");
+        Files.writeString(playlist, "#shuffle\r\n// my picks\r\na\r\n\r\n  b  \r\nc\r\n");
+
+        PlaylistLoader.PlaylistResult<Boolean> result = loader.removeItemIfPresentResult("mix", "b");
+
+        assertTrue(result.isSuccess());
+        assertTrue(result.getValue());
+        assertEquals("#shuffle\r\n// my picks\r\na\r\n\r\nc\r\n", Files.readString(playlist));
     }
 }

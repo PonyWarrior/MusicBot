@@ -342,13 +342,31 @@ public class OtherUtil
 
         for (int i = 0; i < length; i++)
         {
-            int curr = i < currentParts.length ? Integer.parseInt(currentParts[i].replaceAll("\\D", "")) : 0;
-            int late = i < latestParts.length ? Integer.parseInt(latestParts[i].replaceAll("\\D", "")) : 0;
+            int curr = i < currentParts.length ? numericPart(currentParts[i]) : 0;
+            int late = i < latestParts.length ? numericPart(latestParts[i]) : 0;
 
             if (late > curr) return true;
             if (late < curr) return false;
         }
         return false;
+    }
+
+    /**
+     * The digits of one version part, or 0 when it has none (for example "RELEASE").
+     */
+    private static int numericPart(String part)
+    {
+        String digits = part.replaceAll("\\D", "");
+        if (digits.isEmpty())
+            return 0;
+        try
+        {
+            return Integer.parseInt(digits);
+        }
+        catch (NumberFormatException e)
+        {
+            return Integer.MAX_VALUE;
+        }
     }
 
     /**

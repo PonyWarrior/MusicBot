@@ -88,6 +88,15 @@ public class YtDlpDownloader
      *
      * @return true if yt-dlp is usable
      */
+    /**
+     * @return true while any yt-dlp process started by the bot is still running
+     */
+    public static boolean isBusy()
+    {
+        RUNNING.removeIf(process -> !process.isAlive());
+        return !RUNNING.isEmpty();
+    }
+
     public boolean isAvailable()
     {
         if (!Files.isDirectory(workingDirectory))

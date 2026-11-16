@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# The job only reads the branch name; it needs no token scopes.
+permissions: {}
+
 jobs:
   validate-branch-name:
     name: Validate Branch Naming Convention
@@ -18,9 +21,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Validate branch name
+        # Passed through the environment, never interpolated into the script: a branch name
+        # is attacker-controlled and `${{ }}` would splice it into the shell as code.
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
         run: |
-          # Extract branch name from pull request head ref
-          BRANCH_NAME="${{ github.head_ref }}"
           
           echo "Validating branch: $BRANCH_NAME"
           

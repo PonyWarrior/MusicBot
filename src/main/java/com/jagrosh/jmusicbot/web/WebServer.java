@@ -143,7 +143,7 @@ public class WebServer
     /**
      * @return the directory that holds the running jar (or classes), or null when unknown
      */
-    private static Path codeDirectory()
+    public static Path codeDirectory()
     {
         try
         {
@@ -173,6 +173,7 @@ public class WebServer
             server.createContext("/api/action", guarded(this::handleAction));
             server.createContext("/api/restart", guarded(this::handleRestart));
             server.createContext("/api/theme", guarded(this::handleTheme));
+            server.createContext("/api/updates", guarded(this::handleUpdates));
             server.createContext("/", guarded(this::handleStatic));
             server.setExecutor(Executors.newFixedThreadPool(4, runnable ->
             {
@@ -378,6 +379,70 @@ public class WebServer
         sendJson(exchange, 405, Map.of("error", "method not allowed"));
     }
 
+    /**
+     * GET returns the updater status; POST {@code {"action":"check"}} or
+     * {@code {"action":"update","component":"yt-dlp"}} (no component = everything) starts work in
+     * the background and answers 409 when the updater is already busy.
+     */
+    private void handleUpdates(HttpExchange exchange) throws IOException
+    {
+        com.jagrosh.jmusicbot.update.UpdateManager updates = bot == null ? null : bot.getUpdateManager();
+        if (updates == null)
+        {
+            sendJson(exchange, 503, Map.of("ok", false, "error", "updater unavailable"));
+            return;
+        }
+
+        if ("GET".equalsIgnoreCase(exchange.getRequestMethod()))
+        {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("busy", updates.isBusy());
+            body.put("lastMessage", updates.getLastMessage());
+            body.put("auto", bot.getConfig().useAutoUpdates());
+            body.put("beta", bot.getConfig().useBetaUpdates());
+            body.put("components", updates.getStatus());
+            sendJson(exchange, 200, body);
+            return;
+        }
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod()))
+        {
+            sendJson(exchange, 405, Map.of("error", "method not allowed"));
+            return;
+        }
+
+        Map<?, ?> request = MAPPER.readValue(exchange.getRequestBody().readAllBytes(), Map.class);
+        String action = String.valueOf(request.get("action"));
+        Object componentId = request.get("component");
+        boolean started;
+        switch (action)
+        {
+            case "check" -> started = updates.checkAsync();
+            case "update" ->
+            {
+                com.jagrosh.jmusicbot.update.UpdateComponent component = null;
+                if (componentId != null && !String.valueOf(componentId).isBlank())
+                {
+                    component = com.jagrosh.jmusicbot.update.UpdateComponent.fromId(String.valueOf(componentId));
+                    if (component == null)
+                    {
+                        sendJson(exchange, 400, Map.of("ok", false, "error", "unknown component"));
+                        return;
+                    }
+                }
+                started = updates.updateAsync(component);
+            }
+            default ->
+            {
+                sendJson(exchange, 400, Map.of("ok", false, "error", "unknown action"));
+                return;
+            }
+        }
+        if (started)
+            sendJson(exchange, 202, Map.of("ok", true));
+        else
+            sendJson(exchange, 409, Map.of("ok", false, "error", "The updater is already running."));
+    }
+
     private void handleRestart(HttpExchange exchange) throws IOException
     {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod()))
@@ -442,7 +507,7 @@ public class WebServer
      *
      * @return the launcher, or null when neither run-gui.bat nor run.bat exists
      */
-    private static Path findLauncher()
+    public static Path findLauncher()
     {
         List<Path> directories = new ArrayList<>();
         directories.add(codeDirectory());
@@ -922,9 +987,9 @@ public class WebServer
         AudioHandler handler = (AudioHandler) guild.getAudioManager().getSendingHandler();
         if (handler == null)
             return list;
-        for (int i = 0; i < handler.getQueue().getHistory().size(); i++)
+        // One snapshot, so a track ending mid-request cannot shift the indexes.
+        for (QueuedTrack queued : handler.getQueue().getHistory().getList())
         {
-            QueuedTrack queued = handler.getQueue().getHistory().get(i);
             AudioTrack track = queued.getTrack();
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", Integer.toHexString(System.identityHashCode(queued)));

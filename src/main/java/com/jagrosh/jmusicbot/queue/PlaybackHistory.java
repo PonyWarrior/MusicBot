@@ -62,7 +62,7 @@ public class PlaybackHistory<T> {
      * @param item The item to add to history
      * @throws NullPointerException if item is null
      */
-    public void add(T item) {
+    public synchronized void add(T item) {
         Objects.requireNonNull(item, "item");
         if (maxSize == 0) {
             return;
@@ -88,7 +88,7 @@ public class PlaybackHistory<T> {
      *
      * @return The most recently added item, or null if history is empty
      */
-    public T removeFirst() {
+    public synchronized T removeFirst() {
         T removed = history.pollFirst();
         if (removed != null && keySet != null) {
             keySet.remove(keyExtractor.apply(removed));
@@ -103,7 +103,7 @@ public class PlaybackHistory<T> {
      * @param size The maximum number of items to keep (must be >= 0; 0 disables history storage)
      * @throws IllegalArgumentException if size is negative
      */
-    public void setMaxSize(int size) {
+    public synchronized void setMaxSize(int size) {
         if (size < 0) {
             throw new IllegalArgumentException("Max size must be non-negative, got: " + size);
         }
@@ -121,14 +121,14 @@ public class PlaybackHistory<T> {
      *
      * @return The maximum size
      */
-    public int getMaxSize() {
+    public synchronized int getMaxSize() {
         return maxSize;
     }
 
     /**
      * Clears all items from the history.
      */
-    public void clear() {
+    public synchronized void clear() {
         history.clear();
         if (keySet != null) {
             keySet.clear();
@@ -140,7 +140,7 @@ public class PlaybackHistory<T> {
      *
      * @return The current size
      */
-    public int size() {
+    public synchronized int size() {
         return history.size();
     }
 
@@ -149,7 +149,7 @@ public class PlaybackHistory<T> {
      *
      * @return true if history is empty, false otherwise
      */
-    public boolean isEmpty() {
+    public synchronized boolean isEmpty() {
         return history.isEmpty();
     }
 
@@ -159,7 +159,7 @@ public class PlaybackHistory<T> {
      *
      * @return An unmodifiable list of history items
      */
-    public List<T> getList() {
+    public synchronized List<T> getList() {
         return List.copyOf(history);
     }
 
@@ -171,7 +171,7 @@ public class PlaybackHistory<T> {
      * @return The item at that index
      * @throws IndexOutOfBoundsException if index is out of range
      */
-    public T get(int index) {
+    public synchronized T get(int index) {
         return history.get(index);
     }
 
@@ -182,7 +182,7 @@ public class PlaybackHistory<T> {
      * @param index The index to remove (0 = most recent)
      * @return The removed item, or null if index is out of range
      */
-    public T removeAt(int index) {
+    public synchronized T removeAt(int index) {
         if (index < 0 || index >= history.size()) {
             return null;
         }
@@ -200,7 +200,7 @@ public class PlaybackHistory<T> {
      * @param key The key to remove (e.g. track identifier)
      * @return true if an entry was removed, false otherwise
      */
-    public boolean removeByKey(Object key) {
+    public synchronized boolean removeByKey(Object key) {
         if (keySet == null || !keySet.contains(key)) {
             return false;
         }
@@ -221,7 +221,7 @@ public class PlaybackHistory<T> {
      * @param predicate The condition to match (e.g. same track identifier/URI)
      * @return true if an item was removed, false otherwise
      */
-    public boolean removeFirstMatching(Predicate<T> predicate) {
+    public synchronized boolean removeFirstMatching(Predicate<T> predicate) {
         if (predicate == null) {
             return false;
         }

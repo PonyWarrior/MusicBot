@@ -83,7 +83,8 @@ public final class LocalRequestGuard
 
         if (!isLoopbackName(host))
             return false;
-        return port <= 0 || hostPort < 0 || hostPort == port;
+        // No port means the client addressed port 80, which is never this server's port.
+        return port <= 0 || (hostPort < 0 ? 80 : hostPort) == port;
     }
 
     /**
@@ -118,8 +119,12 @@ public final class LocalRequestGuard
         if (!isLoopbackName(uri.getHost()))
             return false;
 
+        // An origin without a port is on the scheme's default port: another local web server
+        // on 80/443 must not be able to drive this API.
         int originPort = uri.getPort();
-        return port <= 0 || originPort < 0 || originPort == port;
+        if (originPort < 0)
+            originPort = scheme.equalsIgnoreCase("https") ? 443 : 80;
+        return port <= 0 || originPort == port;
     }
 
     private static boolean isLoopbackName(String host)

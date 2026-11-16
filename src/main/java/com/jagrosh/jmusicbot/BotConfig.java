@@ -78,6 +78,7 @@ public class BotConfig {
     private List<String> libraryYtdlpArgs = new ArrayList<>();
     private String proxyHost;
     private boolean proxyLavaplayer, proxyJda, proxyGithub;
+    private volatile boolean updateAuto, updateBeta;
     private double skipratio;
     private OnlineStatus status;
     private Activity game;
@@ -273,6 +274,8 @@ public class BotConfig {
         npShowButtons = NP_SHOW_BUTTONS.getBoolean(config);
         showNpProgressBar = NP_SHOW_PROGRESS_BAR.getBoolean(config);
         updatealerts = UPDATE_ALERTS.getBoolean(config);
+        updateAuto = UPDATE_AUTO.hasValue(config) && UPDATE_AUTO.getBoolean(config);
+        updateBeta = UPDATE_BETA.hasValue(config) && UPDATE_BETA.getBoolean(config);
         logLevel = LOG_LEVEL.getString(config);
         useEval = USE_EVAL.getBoolean(config);
         evalEngine = EVAL_ENGINE.getString(config);
@@ -508,6 +511,22 @@ public class BotConfig {
 
     public boolean useUpdateAlerts() {
         return updatealerts;
+    }
+
+    /** @return true when updates are installed automatically while the bot is idle */
+    public boolean useAutoUpdates() {
+        return updateAuto;
+    }
+
+    /** @return true when pre-release versions of the bot are offered */
+    public boolean useBetaUpdates() {
+        return updateBeta;
+    }
+
+    /** Applies the update toggles at runtime; the caller persists them to config.txt. */
+    public void setUpdateToggles(boolean auto, boolean beta) {
+        this.updateAuto = auto;
+        this.updateBeta = beta;
     }
 
     public String getLogLevel() {

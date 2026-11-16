@@ -110,7 +110,32 @@ public class JMusicBot
      *
      * @param config the bot configuration
      */
-    private static void startLocalCipherService(BotConfig config)
+    /**
+     * Stops the local cipher service, if it is running.
+     */
+    public static synchronized void stopLocalCipherService()
+    {
+        if (localCipherService != null)
+        {
+            localCipherService.stop();
+            localCipherService = null;
+        }
+    }
+
+    /**
+     * Stops the local cipher service and starts it again, for example after its files changed.
+     *
+     * @param config the bot configuration
+     * @return true when the service is running afterwards
+     */
+    public static synchronized boolean restartLocalCipherService(BotConfig config)
+    {
+        stopLocalCipherService();
+        startLocalCipherService(config);
+        return localCipherService != null;
+    }
+
+    private static synchronized void startLocalCipherService(BotConfig config)
     {
         if (!config.useLocalCipher())
         {
@@ -187,6 +212,9 @@ public class JMusicBot
                     "Please close the other instance first.");
             System.exit(1);
         }
+
+        // Tell a pending bot update (apply-update.ps1) that the new jar got this far.
+        com.jagrosh.jmusicbot.update.UpdateManager.markStarted();
         
         // Startup checks
         OtherUtil.checkVersion(userInteraction);

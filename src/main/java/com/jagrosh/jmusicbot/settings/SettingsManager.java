@@ -27,8 +27,11 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.NoSuchFileException;
-import java.util.HashMap;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 
 /**
@@ -39,12 +42,12 @@ public class SettingsManager implements GuildSettingsManager<Settings>
 {
     private final static Logger LOG = LoggerFactory.getLogger(SettingsManager.class);
     private final static String SETTINGS_FILE = "serversettings.json";
-    private final HashMap<Long,Settings> settings;
+    private final ConcurrentHashMap<Long,Settings> settings;
     private final static ObjectMapper objectMapper = new ObjectMapper();
 
     public SettingsManager()
     {
-        this.settings = new HashMap<>();
+        this.settings = new ConcurrentHashMap<>();
 
         try {
             String jsonContent = new String(Files.readAllBytes(OtherUtil.getPath(SETTINGS_FILE)));
@@ -88,8 +91,13 @@ public class SettingsManager implements GuildSettingsManager<Settings>
                 LOG.warn("Failed to create new settings file: "+ex);
             }
             return;
-        } catch(IOException e) {
+        } catch(IOException | RuntimeException e) {
+            // Keep the unreadable file: the next save would otherwise replace it with only the
+            // guilds touched since startup, losing every other guild's settings.
+            settings.clear();
             LOG.warn("Failed to load server settings: "+e);
+            backUpUnreadableFile();
+            return;
         }
 
         LOG.info("serversettings.json loaded from " + OtherUtil.getPath("serversettings.json").toAbsolutePath());
@@ -118,7 +126,19 @@ public class SettingsManager implements GuildSettingsManager<Settings>
                 NowPlayingLayoutMode.INHERIT, NowPlayingButtonsMode.INHERIT);
     }
 
-    protected void writeSettings()
+    private static void backUpUnreadableFile()
+    {
+        Path file = OtherUtil.getPath(SETTINGS_FILE);
+        Path backup = file.resolveSibling(SETTINGS_FILE + ".corrupt-" + System.currentTimeMillis());
+        try {
+            Files.copy(file, backup);
+            LOG.warn("The unreadable settings file was copied to " + backup.toAbsolutePath());
+        } catch(IOException ex) {
+            LOG.warn("Could not back up the unreadable settings file: "+ex);
+        }
+    }
+
+    protected synchronized void writeSettings()
     {
         ObjectNode obj = JsonNodeFactory.instance.objectNode();
         settings.keySet().stream().forEach(key -> {
@@ -150,9 +170,24 @@ public class SettingsManager implements GuildSettingsManager<Settings>
         });
         try {
             // Use Jackson with pretty printing (indentation)
-            Files.write(OtherUtil.getPath(SETTINGS_FILE), objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(obj));
+            writeAtomically(OtherUtil.getPath(SETTINGS_FILE), objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(obj));
         } catch(IOException ex){
             LOG.warn("Failed to write to file: "+ex);
+        }
+    }
+
+    /**
+     * Writes through a temporary file and a rename, so a crash or full disk mid-write leaves the
+     * previous file intact instead of a truncated one.
+     */
+    public static void writeAtomically(Path target, byte[] content) throws IOException
+    {
+        Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+        Files.write(temp, content);
+        try {
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch(AtomicMoveNotSupportedException e) {
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 }

@@ -49,7 +49,7 @@ public abstract class AbstractQueue<T extends Queueable>
 
     public abstract int add(T item);
 
-    public void addAt(int index, T item)
+    public synchronized void addAt(int index, T item)
     {
         if(index >= list.size())
             list.add(item);
@@ -57,22 +57,22 @@ public abstract class AbstractQueue<T extends Queueable>
             list.add(index, item);
     }
 
-    public int size() {
+    public synchronized int size() {
         return list.size();
     }
 
-    public T pull() {
+    public synchronized T pull() {
         if (list.isEmpty())
             return null;
         return list.remove(0);
     }
 
-    public void addToHistory(T item)
+    public synchronized void addToHistory(T item)
     {
         history.add(item);
     }
 
-    public void setMaxHistorySize(int size)
+    public synchronized void setMaxHistorySize(int size)
     {
         history.setMaxSize(size);
     }
@@ -80,12 +80,12 @@ public abstract class AbstractQueue<T extends Queueable>
     /**
      * Clears playback history entries.
      */
-    public void clearHistory()
+    public synchronized void clearHistory()
     {
         history.clear();
     }
 
-    public T removeLastPlayed()
+    public synchronized T removeLastPlayed()
     {
         return history.removeFirst();
     }
@@ -97,7 +97,7 @@ public abstract class AbstractQueue<T extends Queueable>
      * @param index The history index to remove
      * @return The removed item, or null if index is out of range
      */
-    public T removeFromHistoryAt(int index)
+    public synchronized T removeFromHistoryAt(int index)
     {
         return history.removeAt(index);
     }
@@ -109,7 +109,7 @@ public abstract class AbstractQueue<T extends Queueable>
      * @param predicate The condition to match (e.g. same track identifier)
      * @return true if an entry was removed, false otherwise
      */
-    public boolean removeFromHistoryFirstMatch(Predicate<T> predicate)
+    public synchronized boolean removeFromHistoryFirstMatch(Predicate<T> predicate)
     {
         return history.removeFirstMatching(predicate);
     }
@@ -120,7 +120,7 @@ public abstract class AbstractQueue<T extends Queueable>
      * @param current The currently playing item to push back to the queue
      * @return The previous item to play, or null if history is empty
      */
-    public T rewind(T current)
+    public synchronized T rewind(T current)
     {
         T prev = history.removeFirst();
         if (prev != null && current != null)
@@ -130,31 +130,34 @@ public abstract class AbstractQueue<T extends Queueable>
         return prev;
     }
 
-    public boolean isEmpty()
+    public synchronized boolean isEmpty()
     {
         return list.isEmpty();
     }
 
-    public List<T> getList()
+    /**
+     * @return a snapshot of the queue; changes to it do not affect the queue
+     */
+    public synchronized List<T> getList()
     {
-        return list;
+        return List.copyOf(list);
     }
 
-    public PlaybackHistory<T> getHistory()
+    public synchronized PlaybackHistory<T> getHistory()
     {
         return history;
     }
 
-    public T get(int index) {
+    public synchronized T get(int index) {
         return list.get(index);
     }
 
-    public T remove(int index)
+    public synchronized T remove(int index)
     {
         return list.remove(index);
     }
 
-    public int removeAll(long identifier)
+    public synchronized int removeAll(long identifier)
     {
         int count = 0;
         for(int i=list.size()-1; i>=0; i--)
@@ -168,18 +171,18 @@ public abstract class AbstractQueue<T extends Queueable>
         return count;
     }
 
-    public void clear()
+    public synchronized void clear()
     {
         list.clear();
     }
 
-    public void clearAll()
+    public synchronized void clearAll()
     {
         list.clear();
         history.clear();
     }
 
-    public int shuffle(long identifier)
+    public synchronized int shuffle(long identifier)
     {
         List<Integer> iset = new ArrayList<>();
         for(int i=0; i<list.size(); i++)
@@ -198,10 +201,10 @@ public abstract class AbstractQueue<T extends Queueable>
         return iset.size();
     }
 
-    public void skip(int number)
+    public synchronized void skip(int number)
     {
         if (number > 0) {
-            list.subList(0, number).clear();
+            list.subList(0, Math.min(number, list.size())).clear();
         }
     }
 
@@ -211,7 +214,7 @@ public abstract class AbstractQueue<T extends Queueable>
      * @param to The new position of the item
      * @return the moved item
      */
-    public T moveItem(int from, int to)
+    public synchronized T moveItem(int from, int to)
     {
         T item = list.remove(from);
         list.add(to, item);

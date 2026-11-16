@@ -107,6 +107,7 @@ public class CommandFactory {
                     new SetnameCmd(bot),
                     new SetstatusCmd(bot),
                     new ShutdownCmd(bot),
+                    new UpdateCmd(bot),
                     new ClearchannelCmd(bot)
             ).addSlashCommands(
                     // Music commands

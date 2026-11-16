@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -533,48 +534,51 @@ public class MusicLibrary
     {
         String name = normalize(stripExtension(track.path().getFileName().toString()));
 
+        // Matches are on whole words: a plain substring test let "art" match "party" and a
+        // one-letter query match almost every file, so the library answered instead of the
+        // online search with an unrelated track.
         int score = 0;
         if (name.equals(needle))
         {
             score = 1000;
         }
-        else if (name.startsWith(needle))
+        else if (name.startsWith(needle + " "))
         {
             score = 800;
         }
-        else if (name.contains(needle))
+        else if (containsPhrase(name, needle))
         {
             score = 600;
         }
 
         // Every word of the query has to appear somewhere in the track's name or metadata.
+        String artist = normalize(track.artist());
         String[] words = needle.split(" ");
         if (words.length > 1)
         {
-            String haystack = name + " " + normalize(track.artist()) + " " + normalize(track.album());
-            boolean all = true;
-            for (String word : words)
-            {
-                if (!haystack.contains(word))
-                {
-                    all = false;
-                    break;
-                }
-            }
-            if (all)
+            Set<String> haystack = new HashSet<>(Arrays.asList(
+                    (name + " " + artist + " " + normalize(track.album())).split(" ")));
+            if (haystack.containsAll(Arrays.asList(words)))
             {
                 score = Math.max(score, 500);
             }
         }
 
         // A title that also matches the artist is a better match than a title alone.
-        String artist = normalize(track.artist());
-        if (!artist.isEmpty() && artist.contains(needle))
+        if (!artist.isEmpty() && containsPhrase(artist, needle))
         {
             score += 100;
         }
 
         return score;
+    }
+
+    /**
+     * @return true when {@code needle} appears in {@code text} as whole words
+     */
+    public static boolean containsPhrase(String text, String needle)
+    {
+        return !needle.isEmpty() && (" " + text + " ").contains(" " + needle + " ");
     }
 
     /**

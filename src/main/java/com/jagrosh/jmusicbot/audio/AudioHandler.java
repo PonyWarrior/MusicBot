@@ -63,7 +63,7 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
     private final AudioMetricsListener metricsListener;
 
     private AudioFrame lastFrame;
-    private AbstractQueue<QueuedTrack> queue;
+    private volatile AbstractQueue<QueuedTrack> queue;
     private String lastReason = null;
     /** The favorites entry of one track; it only counts while that track is the one playing. */
     private record FavoriteMark(String trackUri, String entry) { }
@@ -85,7 +85,7 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         this.queue = queueType.createInstance(null, maxHistorySize);
     }
 
-    public void setQueueType(QueueType type)
+    public synchronized void setQueueType(QueueType type)
     {
         // History is preserved when switching queue types
         int maxHistorySize = manager.getBot().getConfig().getMaxHistorySize();
@@ -336,9 +336,10 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         }
         
         // Special handling for YouTube OAuth errors
-        if (exception.getMessage().equals("Sign in to confirm you're not a bot")
-            || exception.getMessage().equals("Please sign in")
-            || exception.getMessage().equals("This video requires login."))
+        String failure = exception.getMessage();
+        if ("Sign in to confirm you're not a bot".equals(failure)
+            || "Please sign in".equals(failure)
+            || "This video requires login.".equals(failure))
         {
             LOGGER.error(
                     "Track {} has failed to play: {}. "

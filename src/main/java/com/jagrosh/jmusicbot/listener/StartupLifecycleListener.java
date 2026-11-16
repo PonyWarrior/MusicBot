@@ -89,6 +89,11 @@ public class StartupLifecycleListener extends ListenerAdapter {
                 }
             }, 0, 24, TimeUnit.HOURS);
         }
+        // A pending bot update keeps the new jar once the bot is connected.
+        com.jagrosh.jmusicbot.update.UpdateManager.markReady();
+        if (bot.getUpdateManager() != null) {
+            bot.getUpdateManager().scheduleAutoUpdates();
+        }
         if (bot.getConfig().useYouTubeOauth()) {
             YoutubeOauth2TokenHandler.Data data = bot.getYouTubeOauth2Handler().getData();
             if (data != null) {

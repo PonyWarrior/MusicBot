@@ -75,6 +75,8 @@ public enum ConfigOption {
     NP_SHOW_BUTTONS("nowPlaying.showButtons", ConfigType.BOOLEAN, false, "Whether to include interactive playback buttons in now-playing messages"),
     NP_SHOW_PROGRESS_BAR("nowPlaying.showProgressBar", ConfigType.BOOLEAN, false, "Whether to show the now-playing progress bar"),
     UPDATE_ALERTS("updates.alerts", ConfigType.BOOLEAN, false, "Whether to alert owner about updates"),
+    UPDATE_AUTO("updates.auto", ConfigType.BOOLEAN, false, "Whether to install updates automatically while nothing is playing"),
+    UPDATE_BETA("updates.beta", ConfigType.BOOLEAN, false, "Whether to include pre-release (beta) versions of the bot"),
     USE_EVAL("dangerous.eval", ConfigType.BOOLEAN, false, "Whether to enable eval command (DANGEROUS)"),
     USE_YOUTUBE_OAUTH("playback.youtube.useOAuth", ConfigType.BOOLEAN, false, "Whether to use YouTube OAuth2 for playback"),
     

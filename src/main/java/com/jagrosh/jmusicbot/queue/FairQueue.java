@@ -41,7 +41,7 @@ public class FairQueue<T extends Queueable> extends AbstractQueue<T>
     protected final Set<Long> set = new HashSet<>();
 
     @Override
-    public int add(T item)
+    public synchronized int add(T item)
     {
         int lastIndex;
         for(lastIndex=list.size()-1; lastIndex>-1; lastIndex--)

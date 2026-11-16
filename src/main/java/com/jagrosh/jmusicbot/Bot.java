@@ -71,6 +71,7 @@ public class Bot
     private final MusicLibrary musicLibrary;
     private final LibraryAudioSourceManager librarySource;
     private final YtDlpDownloader ytdlp;
+    private final com.jagrosh.jmusicbot.update.UpdateManager updates;
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(Bot.class);
     
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
@@ -102,6 +103,7 @@ public class Bot
         this.aloneInVoiceHandler.init();
         this.musicService = new MusicService(this);
         this.searchService = new SearchService(this);
+        this.updates = new com.jagrosh.jmusicbot.update.UpdateManager(this);
         
         // Initialize audio load wrapper - use NO_OP when GUI is disabled to avoid monitoring overhead
         this.audioLoadWrapper = isNoGUI() 
@@ -220,6 +222,14 @@ public class Bot
     public MusicService getMusicService()
     {
         return musicService;
+    }
+
+    /**
+     * @return the updater for the bot and its bundled tools
+     */
+    public com.jagrosh.jmusicbot.update.UpdateManager getUpdateManager()
+    {
+        return updates;
     }
 
     public SearchService getSearchService()

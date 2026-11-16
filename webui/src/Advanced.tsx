@@ -11,6 +11,7 @@ import { Stat } from './Dashboard';
 import { formatLength, formatUptime, formatVersion } from './format';
 import LogCard from './LogCard';
 import SettingsPanel, { type SettingsHandle } from './SettingsPanel';
+import UpdatesCard from './UpdatesCard';
 
 interface Props {
   state: State;
@@ -29,6 +30,8 @@ function Advanced({ state, logs, visible, restartNow, settings }: Props) {
   return (
     <VStack gap={4}>
       <SettingsPanel restart={restartNow} handle={settings} />
+
+      <UpdatesCard visible={visible} />
 
       <div className="dashboard-grid">
         <Card padding={4}>

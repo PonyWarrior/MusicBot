@@ -36,7 +36,7 @@ public class LinearQueue<T extends Queueable> extends AbstractQueue<T>
     }
 
     @Override
-    public int add(T item)
+    public synchronized int add(T item)
     {
         list.add(item);
         return list.size() - 1;

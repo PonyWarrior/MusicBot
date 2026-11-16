@@ -22,10 +22,11 @@ class LocalRequestGuardTest
     }
 
     @Test
-    void acceptsLoopbackHostWithoutPort()
+    void hostWithoutPortMeansPort80()
     {
-        assertTrue(LocalRequestGuard.allows("localhost", null, PORT));
-        assertTrue(LocalRequestGuard.allows("127.0.0.1", null, PORT));
+        assertFalse(LocalRequestGuard.allows("localhost", null, PORT));
+        assertFalse(LocalRequestGuard.allows("127.0.0.1", null, PORT));
+        assertTrue(LocalRequestGuard.allows("localhost", null, 80));
     }
 
     @Test
@@ -80,6 +81,17 @@ class LocalRequestGuardTest
     void rejectsOriginOnAnotherPort()
     {
         assertFalse(LocalRequestGuard.allows("127.0.0.1:54321", "http://127.0.0.1:1234", PORT));
+    }
+
+    @Test
+    void originWithoutPortUsesSchemeDefault()
+    {
+        // Another local server on 80/443 must not reach the API.
+        assertFalse(LocalRequestGuard.allows("127.0.0.1:54321", "http://localhost", PORT));
+        assertFalse(LocalRequestGuard.allows("127.0.0.1:54321", "https://127.0.0.1", PORT));
+        assertTrue(LocalRequestGuard.allows("localhost:80", "http://localhost", 80));
+        assertTrue(LocalRequestGuard.allows("localhost:443", "https://localhost", 443));
+        assertFalse(LocalRequestGuard.allows("localhost:443", "http://localhost", 443));
     }
 
     @Test

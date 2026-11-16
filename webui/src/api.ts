@@ -163,6 +163,34 @@ export async function restartBot(): Promise<void> {
   if (!response.ok) throw await errorOf(response);
 }
 
+export interface UpdateStatus {
+  id: string;
+  name: string;
+  present: boolean;
+  installed: string | null;
+  latest: string | null;
+  updateAvailable: boolean;
+  note: string | null;
+}
+
+export interface UpdatesResponse {
+  busy: boolean;
+  lastMessage: string | null;
+  auto: boolean;
+  beta: boolean;
+  components: UpdateStatus[];
+}
+
+export function fetchUpdates(): Promise<UpdatesResponse> {
+  return getJson<UpdatesResponse>('/api/updates', REQUEST_TIMEOUT_MS);
+}
+
+/** Starts a check, or an update of one component (or every component when none is given). */
+export async function runUpdate(action: 'check' | 'update', component?: string): Promise<void> {
+  const response = await postJson('/api/updates', { action, component });
+  if (!response.ok) throw await errorOf(response);
+}
+
 /** `system` means the user has never picked a side, so the page follows the OS. */
 export type ThemeMode = 'light' | 'dark' | 'system';
 

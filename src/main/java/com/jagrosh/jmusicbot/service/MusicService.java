@@ -1891,7 +1891,7 @@ public class MusicService
                     "Playlists storage is misconfigured (`" + path + "`). " + error.getMessage();
             case STORAGE_UNAVAILABLE ->
                     "Playlists storage is unavailable (`" + path + "`). " + error.getMessage();
-            case PLAYLIST_NOT_FOUND -> error.getMessage();
+            case PLAYLIST_NOT_FOUND, INVALID_NAME -> error.getMessage();
         };
     }
 

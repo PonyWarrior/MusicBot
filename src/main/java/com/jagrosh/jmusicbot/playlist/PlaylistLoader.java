@@ -55,7 +55,42 @@ public class PlaylistLoader
     {
         INVALID_CONFIG,
         STORAGE_UNAVAILABLE,
-        PLAYLIST_NOT_FOUND
+        PLAYLIST_NOT_FOUND,
+        INVALID_NAME
+    }
+
+    private static final int MAX_PLAYLIST_NAME_LENGTH = 100;
+    private static final java.util.regex.Pattern RESERVED_WINDOWS_NAME =
+            java.util.regex.Pattern.compile("(?i)(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(\\..*)?");
+
+    /**
+     * Checks that a playlist name stays a plain file name inside the playlists folder. Names come
+     * straight from Discord users, so separators, drive letters, {@code ..}, control characters and
+     * Windows device names are refused before any path is built.
+     *
+     * @param name the requested playlist name
+     * @return true when the name is safe to use as a file name
+     */
+    public static boolean isValidPlaylistName(String name)
+    {
+        if(name == null || name.isEmpty() || name.length() > MAX_PLAYLIST_NAME_LENGTH)
+            return false;
+        if(!name.equals(name.trim()) || name.endsWith("."))
+            return false;
+        for(int i = 0; i < name.length(); i++)
+        {
+            char c = name.charAt(i);
+            if(c < 0x20 || c == 0x7f || "/\\:*?\"<>|".indexOf(c) >= 0)
+                return false;
+        }
+        return !name.equals("..") && !RESERVED_WINDOWS_NAME.matcher(name).matches();
+    }
+
+    private <T> PlaylistResult<T> invalidName(String name)
+    {
+        return PlaylistResult.failure(PlaylistError.of(PlaylistErrorType.INVALID_NAME,
+                "`" + name + "` is not a valid playlist name. Names cannot contain `/ \\ : * ? \" < > |`, start or end with a space, or end with a dot.",
+                config.getPlaylistsFolder(), null));
     }
 
     public static final class PlaylistError
@@ -383,6 +418,8 @@ public class PlaylistLoader
         PlaylistResult<Path> readiness = ensureStorageReady();
         if(!readiness.isSuccess())
             return PlaylistResult.failure(readiness.getError());
+        if(!isValidPlaylistName(name))
+            return invalidName(name);
         try
         {
             Files.createFile(playlistPath(readiness.getValue(), name));
@@ -401,6 +438,8 @@ public class PlaylistLoader
         PlaylistResult<Path> readiness = ensureStorageReady();
         if(!readiness.isSuccess())
             return PlaylistResult.failure(readiness.getError());
+        if(!isValidPlaylistName(name))
+            return invalidName(name);
         Path path = playlistPath(readiness.getValue(), name);
         if(!Files.exists(path))
         {
@@ -425,6 +464,8 @@ public class PlaylistLoader
         PlaylistResult<Path> readiness = ensureStorageReady();
         if(!readiness.isSuccess())
             return PlaylistResult.failure(readiness.getError());
+        if(!isValidPlaylistName(name))
+            return invalidName(name);
 
         Path path = playlistPath(readiness.getValue(), name);
         if(!Files.exists(path))
@@ -457,6 +498,8 @@ public class PlaylistLoader
         PlaylistResult<Path> readiness = ensureStorageReady();
         if(!readiness.isSuccess())
             return PlaylistResult.failure(readiness.getError());
+        if(!isValidPlaylistName(name))
+            return invalidName(name);
         Path path = playlistPath(readiness.getValue(), name);
         if(!Files.exists(path))
         {
@@ -484,6 +527,8 @@ public class PlaylistLoader
         PlaylistResult<Path> readiness = ensureStorageReady();
         if(!readiness.isSuccess())
             return PlaylistResult.failure(readiness.getError());
+        if(!isValidPlaylistName(name))
+            return invalidName(name);
 
         String normalizedItem = item == null ? "" : item.trim();
         if(normalizedItem.isEmpty())
@@ -578,6 +623,8 @@ public class PlaylistLoader
         PlaylistResult<Path> readiness = ensureStorageReady();
         if(!readiness.isSuccess())
             return PlaylistResult.failure(readiness.getError());
+        if(!isValidPlaylistName(name))
+            return invalidName(name);
 
         String normalizedItem = item == null ? "" : item.trim();
         if(normalizedItem.isEmpty())
@@ -608,11 +655,22 @@ public class PlaylistLoader
                         throw new IOException("Failed to acquire a valid lock for playlist file.");
                     }
 
-                    Set<String> entries = readPlaylistItemsFromChannel(channel);
-                    removed = entries.remove(normalizedItem);
+                    // Drop only the matching item lines, so comments, blank lines and the
+                    // #shuffle directive survive the edit.
+                    String content = readChannelContent(channel);
+                    String newline = content.contains("\r\n") ? "\r\n" : "\n";
+                    List<String> kept = new ArrayList<>();
+                    removed = false;
+                    for(String line : content.split("\\R", -1))
+                    {
+                        if(line.trim().equals(normalizedItem))
+                            removed = true;
+                        else
+                            kept.add(line);
+                    }
                     if(removed)
-                        writePlaylistItemsToChannel(channel, entries);
-                    itemsAfterOperation = entries;
+                        writeChannelContent(channel, String.join(newline, kept));
+                    itemsAfterOperation = new LinkedHashSet<>(parsePlaylistLines(kept, false).items);
                 }
             }
             if(favoritesPlaylist)
@@ -630,7 +688,7 @@ public class PlaylistLoader
     private <T> PlaylistResult<T> rememberError(PlaylistErrorType type, String message, String configuredPath, Throwable cause)
     {
         PlaylistError error = PlaylistError.of(type, message, configuredPath, cause);
-        if(type != PlaylistErrorType.PLAYLIST_NOT_FOUND)
+        if(type != PlaylistErrorType.PLAYLIST_NOT_FOUND && type != PlaylistErrorType.INVALID_NAME)
         {
             lastStorageError = error;
             if(cause == null)
@@ -644,7 +702,12 @@ public class PlaylistLoader
 
     private Path playlistPath(Path folder, String name)
     {
-        return folder.resolve(name + ".txt");
+        Path base = folder.toAbsolutePath().normalize();
+        Path path = base.resolve(name + ".txt").normalize();
+        // Backstop for isValidPlaylistName: the file must sit directly in the playlists folder.
+        if(!base.equals(path.getParent()))
+            throw new IllegalArgumentException("Playlist path escapes the playlists folder: " + name);
+        return path;
     }
 
     private void appendLine(FileChannel channel, String value) throws IOException
@@ -667,22 +730,26 @@ public class PlaylistLoader
         channel.write(ByteBuffer.wrap(value.getBytes(StandardCharsets.UTF_8)));
     }
 
-    private void writePlaylistItemsToChannel(FileChannel channel, Set<String> items) throws IOException
+    private void writeChannelContent(FileChannel channel, String content) throws IOException
     {
-        StringBuilder content = new StringBuilder();
-        for(String item : items)
-            content.append(item).append('\n');
         channel.position(0);
         channel.truncate(0);
-        channel.write(ByteBuffer.wrap(content.toString().getBytes(StandardCharsets.UTF_8)));
+        channel.write(ByteBuffer.wrap(content.getBytes(StandardCharsets.UTF_8)));
         channel.force(true);
     }
 
     private Set<String> readPlaylistItemsFromChannel(FileChannel channel) throws IOException
     {
+        List<String> lines = Arrays.asList(readChannelContent(channel).split("\\R"));
+        ParsedPlaylist parsed = parsePlaylistLines(lines, false);
+        return new LinkedHashSet<>(parsed.items);
+    }
+
+    private String readChannelContent(FileChannel channel) throws IOException
+    {
         long size = channel.size();
         if(size <= 0)
-            return new LinkedHashSet<>();
+            return "";
         if(size > Integer.MAX_VALUE)
         {
             throw new IOException("Playlist file is too large to process in memory: " + size + " bytes");
@@ -695,10 +762,7 @@ public class PlaylistLoader
             // read until full buffer
         }
         bytes.flip();
-        String content = StandardCharsets.UTF_8.decode(bytes).toString();
-        List<String> lines = Arrays.asList(content.split("\\R"));
-        ParsedPlaylist parsed = parsePlaylistLines(lines, false);
-        return new LinkedHashSet<>(parsed.items);
+        return StandardCharsets.UTF_8.decode(bytes).toString();
     }
 
     private CacheAppendResult tryAppendWithFreshFavoritesCache(Path path, FileChannel channel, String item) throws IOException

@@ -81,6 +81,28 @@ function Get-Download([string]$Url, [string]$Destination) {
     }
 }
 
+# Downloads one GitHub release asset and checks it against the SHA-256 digest GitHub records for
+# it. $Tag "latest" means the latest release. Returns the release tag.
+function Get-ReleaseAsset([string]$Repo, [string]$Tag, [string]$Name, [string]$Destination) {
+    $api = if ($Tag -eq "latest") { "https://api.github.com/repos/$Repo/releases/latest" }
+           else { "https://api.github.com/repos/$Repo/releases/tags/$Tag" }
+    $headers = @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "jmusicbot-bundle" }
+    if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "Bearer $env:GITHUB_TOKEN" }
+    $release = Invoke-RestMethod -UseBasicParsing -Uri $api -Headers $headers
+    $asset = @($release.assets | Where-Object { $_.name -eq $Name })
+    if ($asset.Count -ne 1) { throw "$Repo $($release.tag_name) has no asset named $Name." }
+    $digest = [string]$asset[0].digest
+    if (-not $digest.StartsWith("sha256:")) { throw "$Repo $($release.tag_name): GitHub has no SHA-256 digest for $Name." }
+    Get-Download $asset[0].browser_download_url $Destination
+    $actual = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $digest.Substring(7).ToLowerInvariant()) {
+        Remove-Item -LiteralPath $Destination -Force
+        throw "Checksum mismatch for $Name from $Repo $($release.tag_name): expected $($digest.Substring(7)), got $actual."
+    }
+    Write-Host "    sha256 ok: $Name"
+    return [string]$release.tag_name
+}
+
 # Extracts the one zip entry whose path matches the wildcard pattern.
 function Expand-ZipEntry([string]$Zip, [string]$Pattern, [string]$Destination) {
     $archive = [IO.Compression.ZipFile]::OpenRead($Zip)
@@ -236,7 +258,7 @@ if (Test-Build "cipher") {
 
     Write-Step "cipher: downloading Deno $DenoVersion"
     $zip = Join-Path $stage "deno.zip"
-    Get-Download "https://github.com/denoland/deno/releases/download/v$DenoVersion/deno-x86_64-pc-windows-msvc.zip" $zip
+    $null = Get-ReleaseAsset "denoland/deno" "v$DenoVersion" "deno-x86_64-pc-windows-msvc.zip" $zip
     Expand-ZipEntry $zip "deno.exe" $deno
     Remove-Item -LiteralPath $zip
     Write-Host "    $(Get-FirstLine 'deno --version' $deno @('--version'))"
@@ -350,11 +372,7 @@ if (Test-Build "ytdlp") {
 
     Write-Step "ytdlp: downloading yt-dlp ($YtDlpVersion)"
     $ytdlp = Join-Path $dir "yt-dlp.exe"
-    if ($YtDlpVersion -eq "latest") {
-        Get-Download "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" $ytdlp
-    } else {
-        Get-Download "https://github.com/yt-dlp/yt-dlp/releases/download/$YtDlpVersion/yt-dlp.exe" $ytdlp
-    }
+    $null = Get-ReleaseAsset "yt-dlp/yt-dlp" $YtDlpVersion "yt-dlp.exe" $ytdlp
     # The version it reports is also its release tag.
     $ytdlpTag = Get-FirstLine "yt-dlp --version" $ytdlp @("--version")
     Write-Host "    yt-dlp $ytdlpTag"
@@ -371,7 +389,7 @@ if (Test-Build "ytdlp") {
     Write-Step "ytdlp: downloading FFmpeg $FfmpegVersion (essentials build)"
     $ffmpeg = Join-Path $dir "ffmpeg.exe"
     $zip = Join-Path $stage "ffmpeg.zip"
-    Get-Download "https://github.com/GyanD/codexffmpeg/releases/download/$FfmpegVersion/ffmpeg-$FfmpegVersion-essentials_build.zip" $zip
+    $null = Get-ReleaseAsset "GyanD/codexffmpeg" $FfmpegVersion "ffmpeg-$FfmpegVersion-essentials_build.zip" $zip
     Expand-ZipEntry $zip "*/bin/ffmpeg.exe" $ffmpeg
     Expand-ZipEntry $zip "*_build/LICENSE" (Join-Path $licenses "ffmpeg-LICENSE.txt")
     Expand-ZipEntry $zip "*_build/README.txt" (Join-Path $licenses "ffmpeg-README.txt")
