@@ -246,10 +246,10 @@ class BotConfigIntegrationTest extends BaseConfigTest {
             assertFalse(enabledSources.contains(AudioSource.VIMEO), 
                 "Vimeo should not be enabled (was explicitly set to false)");
             
-            // The newly added local key IS enabled because after config update and reload,
-            // it exists in the config file with template default (true), so it's considered "explicitly set"
-            assertTrue(enabledSources.contains(AudioSource.LOCAL), 
-                "Local should be enabled (was added to config file with template default true)");
+            // The newly added local key is disabled: it is added with the template default (false),
+            // because local files are opt-in
+            assertFalse(enabledSources.contains(AudioSource.LOCAL), 
+                "Local should be disabled (was added to config file with template default false)");
             
             // After config update, all missing audio source keys are added with template defaults (true)
             // So sources that were missing (like twitch, beam, getyarn, nico, http, bandcamp, vimeo) 

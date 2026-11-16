@@ -369,9 +369,9 @@ class ConfigUpdaterIntegrationTest extends BaseConfigTest {
             assertFalse(audioSources.getBoolean("vimeo"), 
                 "Existing vimeo=false should be preserved");
             
-            // Verify that missing key is added with template default (true)
-            assertTrue(audioSources.getBoolean("local"), 
-                "Missing local key should be added with template default (true)");
+            // Verify that missing key is added with template default (false; local files are opt-in)
+            assertFalse(audioSources.getBoolean("local"), 
+                "Missing local key should be added with template default (false)");
         }
         
         @Test
@@ -419,8 +419,8 @@ class ConfigUpdaterIntegrationTest extends BaseConfigTest {
             // Verify all missing keys get template defaults (true)
             assertTrue(audioSources.getBoolean("soundcloud"), 
                 "Missing soundcloud should get template default (true)");
-            assertTrue(audioSources.getBoolean("local"), 
-                "Missing local should get template default (true)");
+            assertFalse(audioSources.getBoolean("local"), 
+                "Missing local should get template default (false)");
             assertTrue(audioSources.getBoolean("bandcamp"), 
                 "Missing bandcamp should get template default (true)");
             assertTrue(audioSources.getBoolean("vimeo"), 
