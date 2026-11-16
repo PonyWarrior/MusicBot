@@ -180,3 +180,18 @@ jobs:
             "JMusicBot-$VERSION-All.jar" \
             "JMusicBot-$VERSION-windows-x64.zip" \
             SHA256SUMS.txt
+
+      # Only one pre-release exists at a time: a new pre-release replaces the previous one, and
+      # a final release removes it. The release and its tag are deleted; the commits stay.
+      - name: Remove older pre-releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 \
+              --json tagName,isPrerelease \
+              --jq '.[] | select(.isPrerelease) | .tagName' |
+          while read -r TAG; do
+            [ "$TAG" = "$GITHUB_REF_NAME" ] && continue
+            echo "Deleting pre-release $TAG"
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          done

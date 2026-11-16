@@ -42,6 +42,7 @@ import com.jagrosh.jmusicbot.commands.v2.music.SearchSlashCmd;
 import com.jagrosh.jmusicbot.commands.v2.music.SeekSlashCmd;
 import com.jagrosh.jmusicbot.commands.v2.music.ShuffleSlashCmd;
 import com.jagrosh.jmusicbot.commands.v2.music.SkipSlashCmd;
+import com.jagrosh.jmusicbot.commands.v2.owner.UpdateSlashCmd;
 import com.jagrosh.jmusicbot.settings.SettingsManager;
 import com.jagrosh.jmusicbot.utils.OtherUtil;
 import net.dv8tion.jda.api.OnlineStatus;
@@ -145,8 +146,10 @@ public class CommandFactory {
                     new SkipratioSlashCmd(bot),
                     new SettingsSlashCmd(bot),
                     // Owner commands
-                    new ClearchannelSlashCmd(bot)
-            ).setManualUpsert(true);
+                    new ClearchannelSlashCmd(bot),
+                    new UpdateSlashCmd(bot)
+            ).setManualUpsert(true)
+            .setListener(new OwnerOnlyNotice());
 
         if (config.useEval())
             cb.addCommand(new EvalCmd(bot));
