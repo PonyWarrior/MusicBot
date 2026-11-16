@@ -112,6 +112,9 @@ public class OtherUtil
         {
             URL u = new URL(url);
             URLConnection urlConnection = u.openConnection();
+            // A stalled image host must not hang the caller forever.
+            urlConnection.setConnectTimeout(10_000);
+            urlConnection.setReadTimeout(10_000);
             urlConnection.setRequestProperty("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/49.0.2623.112 Safari/537.36");
             return urlConnection.getInputStream();
         }
@@ -232,9 +235,11 @@ public class OtherUtil
             
             OkHttpClient client = clientBuilder.build();
             // First, try to get the latest release
-            Response response = client.newCall(new Request.Builder().get()
+            // try-with-resources closes the response even when it has no body.
+            try(Response response = client.newCall(new Request.Builder().get()
                     .url(baseUrl + "/releases/latest").build())
-                    .execute();
+                    .execute())
+            {
             ResponseBody body = response.body();
             if(body != null)
             {
@@ -257,17 +262,15 @@ public class OtherUtil
                         }
                     }
                 }
-                finally
-                {
-                    response.close();
-                }
+            }
             }
             
             // If the latest release was a pre-release, fetch recent releases and find the latest non-prerelease
             // Limit to first 10 releases (sorted by date, newest first) - should be more than enough
-            Response allReleasesResponse = client.newCall(new Request.Builder().get()
+            try(Response allReleasesResponse = client.newCall(new Request.Builder().get()
                     .url(baseUrl + "/releases?per_page=10").build())
-                    .execute();
+                    .execute())
+            {
             ResponseBody allReleasesBody = allReleasesResponse.body();
             if(allReleasesBody != null)
             {
@@ -293,10 +296,7 @@ public class OtherUtil
                         }
                     }
                 }
-                finally
-                {
-                    allReleasesResponse.close();
-                }
+            }
             }
             return null;
         }

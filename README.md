@@ -118,34 +118,16 @@ already running"* means exactly that: a second one would answer every command tw
 
 YouTube changes its player script often, and youtube-source can no longer extract the signature
 function from the current ones (`must find sig function`). This fork resolves the signature
-through a cipher server instead, which needs no OAuth and no `youtubetoken.txt`:
+through a cipher server instead, which needs no OAuth and no `youtubetoken.txt`. By default the
+bot starts its own [yt-cipher](https://github.com/kikkia/yt-cipher) service locally, so no
+playback request leaves your machine:
 
 ```hocon
 playback.youtube {
   useOAuth = false
-  remoteCipher = "https://cipher.kikkia.dev/"   # the default
-}
-```
-
-The public server is a third party: every stream resolution tells it which video is played.
-To keep that on your machine, run the service locally.
-
-### Local cipher
-
-```powershell
-# from the folder the bot is started in; creates cipher\yt-cipher
-powershell -ExecutionPolicy Bypass -File scripts\windows\setup-cipher.ps1
-```
-
-The script clones yt-cipher, checks out the pinned `yt-dlp/ejs` commit, runs the repository's
-own `patch-ejs.ts`, and applies [a small patch](scripts/windows/yt-cipher-watchdog.patch) that
-makes the service exit when the bot's end of its stdin pipe closes. Then set:
-
-```hocon
-playback.youtube {
-  remoteCipher = "http://127.0.0.1:8001/"   # must point at the local service
+  remoteCipher = "http://127.0.0.1:8001/"   # the default: the local service
   localCipher {
-    enabled = true
+    enabled = true                          # the default
     directory = "cipher/yt-cipher"
     port = 8001
     command = "deno"
@@ -153,8 +135,27 @@ playback.youtube {
 }
 ```
 
+### Local cipher
+
+The Windows package ships Deno and yt-cipher. For a source build, install them once:
+
+```powershell
+# from the folder the bot is started in; creates cipher\yt-cipher
+powershell -ExecutionPolicy Bypass -File scripts\windows\setup-cipher.ps1
+```
+
+The script clones yt-cipher at the pinned commit, checks out the pinned `yt-dlp/ejs` commit,
+runs the repository's own `patch-ejs.ts`, and applies
+[a small patch](scripts/windows/yt-cipher-watchdog.patch) that makes the service exit when the
+bot's end of its stdin pipe closes. Without Deno or the checkout the bot logs an error at startup
+and YouTube playback fails until they are installed.
+
+To use a public cipher server instead (a third party: every stream resolution tells it which
+video is played), set `remoteCipher = "https://cipher.kikkia.dev/"` and
+`localCipher.enabled = false`.
+
 Enabling `localCipher` only starts the service; `remoteCipher` decides which server is used, so
-set both. The bot starts the service right after reading the config, waits for the port (up to
+keep both pointing at the same place. The bot starts the service right after reading the config, waits for the port (up to
 `startupTimeoutSeconds`), writes its output to `logs/yt-cipher.log` and stops it on exit. If the
 bot is killed, the service notices the closed pipe and exits by itself; a leftover service from
 an earlier run is stopped on the next start, but only when it is the configured program. If
@@ -206,6 +207,45 @@ folder instead of on the `PATH`.
   always goes to the online sources.
 * Audio files you put in the folder yourself (`.flac`, `.m4a`, `.mp3`, `.ogg`, `.opus`, `.wav`,
   `.aac`, `.wma`, also in subfolders) are part of the library.
+
+## Direct links and local files
+
+Two audio sources are **off by default** since 0.8.4:
+
+| Source | What it plays | Why it is off |
+|--------|---------------|---------------|
+| `http` | any direct URL to an audio file or stream (`https://example.com/song.mp3`, internet radio) | anyone who can use `play` can make the bot fetch any address, including devices on your own network (router, NAS admin pages) |
+| `local` | any file path on the PC running the bot (`C:\Users\me\song.flac`) | anyone who can use `play` can make the bot open any file the bot's account can read |
+
+**This does not affect the local music library.** Everything in the `Music` folder (including
+favorites) is played by the library's own source and keeps working with both switches off.
+YouTube, SoundCloud, Bandcamp, Vimeo, Twitch and the other sites are not affected either.
+
+What you will see with them off:
+
+* `play https://example.com/song.mp3` or an internet radio URL is not played (the bot reports that nothing was found).
+* `play C:\path\to\file.flac` for a file **outside** the library finds nothing. Put the file in
+  the `Music` folder instead; it is then found by name or path.
+
+To turn them back on, only if you trust everyone who can use the bot's commands:
+
+1. Open `config.txt` (or the **Advanced** tab in the web GUI, *playback* section).
+2. Set the source you need to `true`:
+
+   ```hocon
+   playback {
+     audioSources {
+       http = true    # direct links and internet radio
+       local = true   # any file path on this PC
+     }
+   }
+   ```
+
+3. Save and restart the bot.
+
+Turn on only the one you need. If you enable `http`, consider limiting who can use `play` with
+a DJ role. Existing `config.txt` files keep whatever value they already have; the new default
+only applies to new installs and to keys missing from your file.
 
 ## Web GUI
 

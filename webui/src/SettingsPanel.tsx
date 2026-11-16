@@ -62,6 +62,7 @@ function SettingsPanel({ restart, handle }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [filter, setFilter] = useState('');
   const inputs = useRef(new Map<string, InputNode>());
   const focusNext = useRef<string | null>(null);
@@ -139,21 +140,36 @@ function SettingsPanel({ restart, handle }: Props) {
       return false;
     }
     if (dirtyKeys.length === 0) return true;
+    // The Save button and "Save and restart" can both call this; only one save runs at a time.
+    if (savingRef.current) return false;
 
+    savingRef.current = true;
     setSaving(true);
     setStatus(null);
     try {
+      // Snapshot what is sent: the user may keep typing while the request is in flight.
+      const sent: Record<string, FieldValue> = {};
       const payload: Record<string, Payload> = {};
       for (const entry of entries) {
-        if (dirtyKeys.includes(entry.key)) payload[entry.key] = toPayload(entry, values[entry.key]);
+        if (!dirtyKeys.includes(entry.key)) continue;
+        sent[entry.key] = values[entry.key];
+        payload[entry.key] = toPayload(entry, values[entry.key]);
       }
       await saveSettings(payload);
 
-      // The saved token is not readable again, so clear the field and rebase the form.
-      const saved: Record<string, FieldValue> = { ...values };
-      for (const entry of entries) if (entry.secret) saved[entry.key] = '';
-      setValues(saved);
-      setInitial(saved);
+      // Rebase only the fields that were sent, so edits made during the save stay unsaved.
+      // The saved token is not readable again, so its baseline is empty.
+      const secrets = new Set(entries.filter((entry) => entry.secret).map((entry) => entry.key));
+      setInitial((current) => {
+        const next = { ...current, ...sent };
+        for (const key of secrets) next[key] = '';
+        return next;
+      });
+      setValues((current) => {
+        const next = { ...current };
+        for (const key of secrets) if (key in sent && next[key] === sent[key]) next[key] = '';
+        return next;
+      });
       setStatus('Saved. Restart the bot to apply the new settings.');
       if (!options?.quiet) {
         toast({
@@ -167,6 +183,7 @@ function SettingsPanel({ restart, handle }: Props) {
       setStatus(e instanceof Error ? e.message : String(e));
       return false;
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };

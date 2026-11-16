@@ -119,9 +119,10 @@ try
             $newProcess | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
         }
     }
+    # A jar that is still locked must not abort the rollback: restoring the old jar matters more.
     foreach ($jar in Get-AppJars)
     {
-        Remove-Item -LiteralPath $jar.FullName -Force
+        Remove-Item -LiteralPath $jar.FullName -Force -ErrorAction SilentlyContinue
     }
     Get-ChildItem -LiteralPath $backupDir -Filter '*.jar' | Move-Item -Destination $appDir -Force
     Remove-Markers
@@ -133,6 +134,18 @@ catch
 {
     Remove-Markers
     Write-Result "update failed: $($_.Exception.Message)"
-    if ((Get-AppJars).Count -gt 0) { Start-Bot }
+    try
+    {
+        # Never leave the folder without a jar: bring the backup back if the swap got that far.
+        if ((Get-AppJars).Count -eq 0 -and (Test-Path -LiteralPath $backupDir))
+        {
+            Get-ChildItem -LiteralPath $backupDir -Filter '*.jar' | Move-Item -Destination $appDir -Force
+        }
+        if ((Get-AppJars).Count -gt 0) { Start-Bot }
+    }
+    catch
+    {
+        Write-Log "recovery failed: $($_.Exception.Message)"
+    }
     exit 1
 }

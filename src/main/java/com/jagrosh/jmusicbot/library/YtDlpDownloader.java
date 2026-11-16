@@ -30,6 +30,12 @@ public class YtDlpDownloader
      */
     private static final Set<Process> RUNNING = ConcurrentHashMap.newKeySet();
 
+    /** Guards {@link #RUNNING} and {@link #blocked} so an update cannot swap a binary mid-start. */
+    private static final Object START_LOCK = new Object();
+
+    /** True while an update is replacing yt-dlp or ffmpeg; new processes are refused. */
+    private static boolean blocked;
+
     static
     {
         Runtime.getRuntime().addShutdownHook(new Thread(() ->
@@ -84,11 +90,6 @@ public class YtDlpDownloader
     }
 
     /**
-     * Checks that yt-dlp can be started.
-     *
-     * @return true if yt-dlp is usable
-     */
-    /**
      * @return true while any yt-dlp process started by the bot is still running
      */
     public static boolean isBusy()
@@ -97,6 +98,50 @@ public class YtDlpDownloader
         return !RUNNING.isEmpty();
     }
 
+    /**
+     * Stops new yt-dlp processes from starting, if none is running. Pair every successful call
+     * with {@link #unblockStarts()}.
+     *
+     * @return true when starts are now blocked; false when a process is still running
+     */
+    public static boolean tryBlockStarts()
+    {
+        synchronized (START_LOCK)
+        {
+            if (isBusy())
+                return false;
+            blocked = true;
+            return true;
+        }
+    }
+
+    /** Lets yt-dlp processes start again after {@link #tryBlockStarts()}. */
+    public static void unblockStarts()
+    {
+        synchronized (START_LOCK)
+        {
+            blocked = false;
+        }
+    }
+
+    /** Starts a process and registers it, unless an update is replacing the binaries. */
+    private static Process startTracked(ProcessBuilder builder) throws IOException
+    {
+        synchronized (START_LOCK)
+        {
+            if (blocked)
+                throw new IOException("yt-dlp is being updated, try again in a moment");
+            Process process = builder.start();
+            RUNNING.add(process);
+            return process;
+        }
+    }
+
+    /**
+     * Checks that yt-dlp can be started.
+     *
+     * @return true if yt-dlp is usable
+     */
     public boolean isAvailable()
     {
         if (!Files.isDirectory(workingDirectory))
@@ -118,8 +163,7 @@ public class YtDlpDownloader
                 // The output goes to a file, not a pipe: reading a pipe blocks until EOF, which
                 // would make the waitFor timeout below unreachable and let yt-dlp hang forever.
                 builder.redirectOutput(outputFile.toFile());
-                process = builder.start();
-                RUNNING.add(process);
+                process = startTracked(builder);
                 if (!process.waitFor(2, TimeUnit.MINUTES))
                 {
                     process.destroyForcibly();
@@ -211,8 +255,7 @@ public class YtDlpDownloader
             // The output goes to a file, not a pipe: reading a pipe blocks until EOF, which
             // would make the waitFor timeout below unreachable and let yt-dlp hang forever.
             builder.redirectOutput(outputFile.toFile());
-            process = builder.start();
-            RUNNING.add(process);
+            process = startTracked(builder);
 
             if (!process.waitFor(timeoutMinutes, TimeUnit.MINUTES))
             {

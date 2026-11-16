@@ -20,8 +20,10 @@ Write-Host "==> Cloning yt-dlp into $Directory"
 if (Test-Path (Join-Path $Directory ".git")) {
     Write-Host "    already present, updating"
     git -C $Directory pull --ff-only
+    if ($LASTEXITCODE -ne 0) { throw "git pull of yt-dlp failed." }
 } else {
     git clone $Url $Directory
+    if ($LASTEXITCODE -ne 0) { throw "git clone of yt-dlp failed." }
 }
 
 Write-Host ""
@@ -29,6 +31,7 @@ Write-Host "==> Checking the installation"
 Push-Location $Directory
 try {
     python -m yt_dlp --version
+    if ($LASTEXITCODE -ne 0) { throw "yt-dlp did not start (python -m yt_dlp exit code $LASTEXITCODE)." }
 } finally {
     Pop-Location
 }

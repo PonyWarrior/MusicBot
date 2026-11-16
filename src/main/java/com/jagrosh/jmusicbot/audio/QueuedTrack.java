@@ -20,12 +20,17 @@ import com.jagrosh.jmusicbot.utils.FormatUtil;
 import com.jagrosh.jmusicbot.utils.TimeUtil;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 /**
  *
  * @author John Grosh <john.a.grosh@gmail.com>
  */
 public class QueuedTrack implements Queueable
 {
+    private static final AtomicLong NEXT_ID = new AtomicLong();
+
+    private final long id = NEXT_ID.incrementAndGet();
     private final AudioTrack track;
     private final RequestMetadata requestMetadata;
 
@@ -45,6 +50,14 @@ public class QueuedTrack implements Queueable
         return requestMetadata.getOwner();
     }
     
+    /**
+     * @return a process-unique id, stable for the life of this entry (used as a UI row key)
+     */
+    public long getId()
+    {
+        return id;
+    }
+
     public AudioTrack getTrack()
     {
         return track;

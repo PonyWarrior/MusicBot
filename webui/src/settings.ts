@@ -16,8 +16,15 @@ export function sectionOf(entry: SettingEntry): string {
   return entry.key.split('.')[0];
 }
 
+/**
+ * A DOM id that is unique per key: dots become `-`, any other character is escaped as `_hex`,
+ * so `a.b-c` and `a.b.c` no longer share an id.
+ */
 export function fieldId(entry: SettingEntry): string {
-  return `setting-${entry.key.replace(/[^a-zA-Z0-9]+/g, '-')}`;
+  const escaped = entry.key.replace(/[^a-zA-Z0-9]/g, (ch) =>
+    ch === '.' ? '-' : `_${ch.charCodeAt(0).toString(16)}`,
+  );
+  return `setting-${escaped}`;
 }
 
 /** Lists are edited one item per line, so an entry may safely contain a comma. */

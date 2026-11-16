@@ -137,7 +137,10 @@ if errorlevel 1 exit /b 1
 
 echo [4/4] Creating the zip...
 if exist "%ZIP%" del /q "%ZIP%"
-powershell -NoProfile -Command "Compress-Archive -Path '%DIST%\*' -DestinationPath '%ZIP%' -CompressionLevel Optimal"
+REM The paths go through the environment, so a ' in the folder name cannot break the command.
+set "JMB_ZIP_SRC=%DIST%"
+set "JMB_ZIP_DST=%ZIP%"
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; try { Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::CreateFromDirectory($env:JMB_ZIP_SRC, $env:JMB_ZIP_DST, [IO.Compression.CompressionLevel]::Optimal, $false) } catch { Write-Error $_; exit 1 }"
 if errorlevel 1 exit /b 1
 
 echo [OK] %ZIP%

@@ -45,10 +45,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
@@ -71,6 +73,14 @@ public class UpdateManager
     private static final String BOT_REPO = "PonyWarrior/MusicBot";
     private static final String CIPHER_REPO = "kikkia/yt-cipher";
 
+    /**
+     * The reviewed yt-cipher commit this bot release installs. yt-cipher publishes no releases or
+     * checksums, so following upstream HEAD would run whatever lands there next; instead each bot
+     * release names one commit, and a new commit reaches users only through a bot update. Keep it
+     * equal to {@code $CipherCommit} in {@code scripts/windows/setup-cipher.ps1}.
+     */
+    public static final String PINNED_CIPHER_COMMIT = "1e1fd8e2f34ca90cf23545be72e46307bd3d3d2a";
+
     /** What the GUI and the owner command show for one component. */
     public record Status(String id, String name, boolean present, String installed, String latest,
                          boolean updateAvailable, String note)
@@ -81,12 +91,14 @@ public class UpdateManager
     private final AtomicBoolean busy = new AtomicBoolean();
     private final Map<UpdateComponent, String> latest = new EnumMap<>(UpdateComponent.class);
     private final Map<UpdateComponent, String> notes = new EnumMap<>(UpdateComponent.class);
+    private final Map<UpdateComponent, CachedVersion> versionCache = new ConcurrentHashMap<>();
     private volatile String lastMessage = "";
     private HttpClient client;
 
     public UpdateManager(Bot bot)
     {
         this.bot = bot;
+        recoverInterruptedUpdates();
     }
 
     // ========== Public API ==========
@@ -104,17 +116,26 @@ public class UpdateManager
     }
 
     /** @return the installed and latest known version of every component, without network access */
-    public synchronized List<Status> getStatus()
+    public List<Status> getStatus()
     {
+        // Snapshot the shared maps under the lock, then probe the binaries without it, so a slow
+        // version probe never blocks a concurrent check.
+        Map<UpdateComponent, String> knownSnapshot;
+        Map<UpdateComponent, String> noteSnapshot;
+        synchronized (this)
+        {
+            knownSnapshot = new EnumMap<>(latest);
+            noteSnapshot = new EnumMap<>(notes);
+        }
         List<Status> list = new ArrayList<>();
         for (UpdateComponent component : UpdateComponent.values())
         {
             String installed = installedVersion(component);
             boolean present = component == UpdateComponent.BOT || installed != null || exists(component);
-            String known = latest.get(component);
+            String known = knownSnapshot.get(component);
             boolean available = present && isUpdate(component, known, installed);
             list.add(new Status(component.id(), component.displayName(), present, installed, known,
-                    available, notes.getOrDefault(component, "")));
+                    available, noteSnapshot.getOrDefault(component, "")));
         }
         return list;
     }
@@ -144,18 +165,22 @@ public class UpdateManager
         return runAsync(() ->
         {
             checkNow();
+            // A single component goes through the same "is it newer" check as Update all, so a
+            // click can never downgrade (for example from a beta when the beta channel is off).
             List<UpdateComponent> targets = new ArrayList<>();
-            if (component != null)
-                targets.add(component);
-            else
-                for (Status status : getStatus())
-                    if (status.updateAvailable())
-                        targets.add(UpdateComponent.fromId(status.id()));
+            for (Status status : getStatus())
+            {
+                UpdateComponent candidate = UpdateComponent.fromId(status.id());
+                if (status.updateAvailable() && (component == null || component == candidate))
+                    targets.add(candidate);
+            }
             targets.sort((a, b) -> Boolean.compare(a == UpdateComponent.BOT, b == UpdateComponent.BOT));
 
             if (targets.isEmpty())
             {
-                lastMessage = "Everything is up to date.";
+                lastMessage = component == null
+                        ? "Everything is up to date."
+                        : component.displayName() + " is already up to date.";
                 return;
             }
             List<String> results = new ArrayList<>();
@@ -294,7 +319,7 @@ public class UpdateManager
             case YTDLP -> UpdateSupport.normalizeVersion(latestRelease("yt-dlp/yt-dlp").path("tag_name").asText());
             case FFMPEG -> UpdateSupport.normalizeVersion(latestRelease("GyanD/codexffmpeg").path("tag_name").asText());
             case DENO -> UpdateSupport.normalizeVersion(latestRelease("denoland/deno").path("tag_name").asText());
-            case YTCIPHER -> getJson(API + CIPHER_REPO + "/commits/HEAD").path("sha").asText();
+            case YTCIPHER -> PINNED_CIPHER_COMMIT;
             case BOT -> UpdateSupport.normalizeVersion(botRelease().path("tag_name").asText());
         };
     }
@@ -343,9 +368,9 @@ public class UpdateManager
         {
             return switch (component)
             {
-                case YTDLP -> exists(component) ? UpdateSupport.parseYtDlpVersion(run(ytDlpExe(), "--version")) : null;
-                case FFMPEG -> exists(component) ? UpdateSupport.parseFfmpegVersion(run(ffmpegExe(), "-version")) : null;
-                case DENO -> exists(component) ? UpdateSupport.parseDenoVersion(run(denoExe(), "--version")) : null;
+                case YTDLP -> probeVersion(component, ytDlpExe(), "--version");
+                case FFMPEG -> probeVersion(component, ffmpegExe(), "-version");
+                case DENO -> probeVersion(component, denoExe(), "--version");
                 case YTCIPHER -> Files.isRegularFile(buildInfo())
                         ? UpdateSupport.readBuildInfoCommit(Files.readString(buildInfo(), StandardCharsets.UTF_8))
                         : null;
@@ -356,6 +381,40 @@ public class UpdateManager
         {
             return null;
         }
+    }
+
+    /**
+     * Runs {@code exe <flag>} and parses its version. The result is cached against the file's
+     * size and modification time, so status polls do not start a process every time.
+     */
+    private String probeVersion(UpdateComponent component, Path exe, String flag)
+            throws IOException, InterruptedException
+    {
+        if (!Files.isRegularFile(exe))
+        {
+            versionCache.remove(component);
+            return null;
+        }
+        long modified = Files.getLastModifiedTime(exe).toMillis();
+        long size = Files.size(exe);
+        CachedVersion cached = versionCache.get(component);
+        if (cached != null && cached.modified() == modified && cached.size() == size)
+            return cached.version();
+
+        String output = run(exe, flag);
+        String version = switch (component)
+        {
+            case YTDLP -> UpdateSupport.parseYtDlpVersion(output);
+            case FFMPEG -> UpdateSupport.parseFfmpegVersion(output);
+            case DENO -> UpdateSupport.parseDenoVersion(output);
+            default -> null;
+        };
+        versionCache.put(component, new CachedVersion(modified, size, version));
+        return version;
+    }
+
+    private record CachedVersion(long modified, long size, String version)
+    {
     }
 
     private boolean exists(UpdateComponent component)
@@ -417,6 +476,7 @@ public class UpdateManager
     {
         if (!isWindows())
             return "automatic updates are only available in the Windows package";
+        recoverInterruptedUpdates();
         if (!exists(component))
             return "not installed, skipped";
         // The bot update restarts the process, which would cut off whatever is playing.
@@ -438,6 +498,18 @@ public class UpdateManager
             LOG.error("Could not update {}", component.displayName(), e);
             return "failed (" + e.getMessage() + ")";
         }
+        finally
+        {
+            // Downloads and extracted archives are only needed during the install.
+            try
+            {
+                UpdateSupport.deleteRecursively(updateDirectory().resolve("work"));
+            }
+            catch (Exception e)
+            {
+                LOG.debug("Could not clean the update work folder: {}", e.getMessage());
+            }
+        }
     }
 
     private String installYtDlp() throws Exception
@@ -447,7 +519,9 @@ public class UpdateManager
         JsonNode release = latestRelease("yt-dlp/yt-dlp");
         JsonNode asset = asset(release, "yt-dlp.exe");
         Path staged = downloadVerified(release, asset, "yt-dlp.exe");
-        swapFile(staged, ytDlpExe(), () -> UpdateSupport.parseYtDlpVersion(run(ytDlpExe(), "--version")) != null);
+        if (!swapWhileIdle(staged, ytDlpExe(),
+                () -> UpdateSupport.parseYtDlpVersion(run(ytDlpExe(), "--version")) != null))
+            return "a download is running, try again later";
         return "updated to " + UpdateSupport.normalizeVersion(release.path("tag_name").asText());
     }
 
@@ -460,7 +534,9 @@ public class UpdateManager
         JsonNode asset = asset(release, "ffmpeg-" + tag + "-essentials_build.zip");
         Path zip = downloadVerified(release, asset, "ffmpeg.zip");
         Path exe = extractOne(zip, "bin/ffmpeg.exe");
-        swapFile(exe, ffmpegExe(), () -> UpdateSupport.parseFfmpegVersion(run(ffmpegExe(), "-version")) != null);
+        if (!swapWhileIdle(exe, ffmpegExe(),
+                () -> UpdateSupport.parseFfmpegVersion(run(ffmpegExe(), "-version")) != null))
+            return "a download is running, try again later";
         return "updated to " + UpdateSupport.normalizeVersion(tag);
     }
 
@@ -489,9 +565,7 @@ public class UpdateManager
 
     private String installYtCipher() throws Exception
     {
-        String sha = getJson(API + CIPHER_REPO + "/commits/HEAD").path("sha").asText();
-        if (!sha.matches("[0-9a-f]{40}"))
-            throw new IOException("unexpected commit id from GitHub");
+        String sha = PINNED_CIPHER_COMMIT;
 
         Path work = cleanWorkDir("yt-cipher");
         Path zip = download(API + CIPHER_REPO + "/zipball/" + sha, work.resolve("yt-cipher.zip"));
@@ -518,13 +592,12 @@ public class UpdateManager
                 "server.ts", "worker.ts");
         cache.directory(staged.toFile());
         cache.environment().put("DENO_DIR", staged.resolve("deno-cache").toString());
-        cache.redirectErrorStream(true);
-        Process process = cache.start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (!process.waitFor(5, TimeUnit.MINUTES) || process.exitValue() != 0)
+        ProcessOutput cached = runWithTimeout(cache, 5, TimeUnit.MINUTES);
+        if (cached == null || cached.exitCode() != 0)
         {
             UpdateSupport.deleteRecursively(staged);
-            throw new IOException("deno cache failed: " + tail(output));
+            throw new IOException("deno cache failed: "
+                    + (cached == null ? "timed out" : tail(cached.output())));
         }
 
         BotConfig config = bot.getConfig();
@@ -629,6 +702,27 @@ public class UpdateManager
         boolean ok() throws Exception;
     }
 
+    /**
+     * Swaps a binary used by yt-dlp downloads while no download can start. Checking
+     * {@link YtDlpDownloader#isBusy()} alone would leave a gap between the check and the swap.
+     *
+     * @return false when a download is running and nothing was swapped
+     */
+    private static boolean swapWhileIdle(Path staged, Path target, Check check) throws Exception
+    {
+        if (!YtDlpDownloader.tryBlockStarts())
+            return false;
+        try
+        {
+            swapFile(staged, target, check);
+            return true;
+        }
+        finally
+        {
+            YtDlpDownloader.unblockStarts();
+        }
+    }
+
     /** Replaces {@code target} with {@code staged}, keeping a backup that is restored if the check fails. */
     private static void swapFile(Path staged, Path target, Check check) throws Exception
     {
@@ -658,12 +752,87 @@ public class UpdateManager
         }
         if (!ok)
         {
-            Files.deleteIfExists(target);
+            // The failed exe may still be locked by a probe that was just killed; Windows allows
+            // renaming it even then, so move it aside instead of deleting it.
+            Path failed = target.resolveSibling(target.getFileName() + ".failed");
+            deleteQuietly(failed);
+            Files.move(target, failed, StandardCopyOption.REPLACE_EXISTING);
             Files.move(backup, target);
+            deleteQuietly(failed);
             throw new IOException("the new " + target.getFileName() + " did not run, rolled back");
         }
         // Windows lets a running exe be renamed but not deleted; a locked backup goes on the next run.
         deleteQuietly(backup);
+    }
+
+    /**
+     * Puts a backup back when an update was cut off between moving the current file or folder
+     * aside and moving the new one in (a crash, a restart, the window being closed). Without
+     * this the component would look "not installed" and never be updated again.
+     *
+     * @param target the file or folder an update replaces
+     * @return true when something was restored
+     */
+    public static boolean restoreIfMissing(Path target)
+    {
+        if (Files.exists(target))
+            return false;
+        Path backup = newestBackup(target);
+        if (backup == null)
+            return false;
+        try
+        {
+            Files.move(backup, target);
+            LOG.warn("Restored {} from {} after an interrupted update", target.getFileName(), backup.getFileName());
+            return true;
+        }
+        catch (IOException e)
+        {
+            LOG.error("Could not restore {} from {}: {}", target, backup, e.getMessage());
+            return false;
+        }
+    }
+
+    private static Path newestBackup(Path target)
+    {
+        Path plain = target.resolveSibling(target.getFileName() + ".old");
+        if (Files.exists(plain))
+            return plain;
+        Path dir = target.toAbsolutePath().getParent();
+        if (dir == null || !Files.isDirectory(dir))
+            return null;
+        String prefix = target.getFileName() + ".";
+        try (Stream<Path> siblings = Files.list(dir))
+        {
+            return siblings
+                    .filter(p -> p.getFileName().toString().startsWith(prefix)
+                            && p.getFileName().toString().endsWith(".old"))
+                    .max(Comparator.comparing(p -> p.getFileName().toString()))
+                    .orElse(null);
+        }
+        catch (IOException e)
+        {
+            return null;
+        }
+    }
+
+    /** Restores every component an interrupted update left without its file or folder. */
+    private void recoverInterruptedUpdates()
+    {
+        if (!isWindows())
+            return;
+        try
+        {
+            restoreIfMissing(ytDlpExe());
+            restoreIfMissing(ffmpegExe());
+            restoreIfMissing(denoExe());
+            restoreIfMissing(cipherDir());
+            UpdateSupport.deleteRecursively(cipherDir().resolveSibling(cipherDir().getFileName() + ".new"));
+        }
+        catch (Exception e)
+        {
+            LOG.warn("Could not check for an interrupted update: {}", e.getMessage());
+        }
     }
 
     private static void deleteQuietly(Path path)
@@ -844,15 +1013,50 @@ public class UpdateManager
         command.addAll(List.of(args));
         ProcessBuilder builder = new ProcessBuilder(command);
         builder.directory(exe.getParent().toFile());
-        builder.redirectErrorStream(true);
-        Process process = builder.start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (!process.waitFor(30, TimeUnit.SECONDS))
-        {
-            process.destroyForcibly();
+        ProcessOutput result = runWithTimeout(builder, 30, TimeUnit.SECONDS);
+        if (result == null)
             throw new IOException(exe.getFileName() + " did not answer");
+        return result.output();
+    }
+
+    /** The merged output and exit code of a finished process. */
+    public record ProcessOutput(int exitCode, String output) { }
+
+    /**
+     * Runs a process with a hard deadline. The output goes to a temporary file instead of a pipe,
+     * so a process that never closes its output cannot block the caller past the deadline.
+     *
+     * @return the result, or null when the process was killed for running too long
+     */
+    public static ProcessOutput runWithTimeout(ProcessBuilder builder, long timeout, TimeUnit unit)
+            throws IOException, InterruptedException
+    {
+        Path log = Files.createTempFile("jmb-process", ".log");
+        try
+        {
+            builder.redirectErrorStream(true);
+            builder.redirectOutput(log.toFile());
+            Process process = builder.start();
+            if (!process.waitFor(timeout, unit))
+            {
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+                return null;
+            }
+            return new ProcessOutput(process.exitValue(), Files.readString(log, StandardCharsets.UTF_8));
         }
-        return output;
+        finally
+        {
+            try
+            {
+                Files.deleteIfExists(log);
+            }
+            catch (IOException ignored)
+            {
+                // A killed child may still hold the file on Windows; the temp folder cleans it up.
+            }
+        }
     }
 
     private static String tail(String text)

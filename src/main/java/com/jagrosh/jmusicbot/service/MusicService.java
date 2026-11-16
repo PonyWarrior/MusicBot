@@ -341,6 +341,16 @@ public class MusicService
             output.replyError("You need to be a DJ or the requester to go back!");
             return;
         }
+
+        // A Discord button and the web GUI can ask at the same time; both would pop history.
+        synchronized (handler)
+        {
+            rewind(guild, handler, output);
+        }
+    }
+
+    private void rewind(Guild guild, AudioHandler handler, OutputAdapter output)
+    {
         AudioTrack playing = handler.getPlayer().getPlayingTrack();
 
         if (playing != null && playing.getPosition() > 5000)

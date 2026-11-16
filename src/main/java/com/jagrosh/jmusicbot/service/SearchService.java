@@ -94,7 +94,9 @@ public class SearchService
         LOG.debug("Search requested: guild={}, user={}, query=\"{}\", prefix={}",
                 guild.getId(), member.getUser().getName(), query, searchPrefix);
 
-        if (query == null || query.isEmpty())
+        // A whitespace-only query would be sent as "ytsearch:   ", which never answers.
+        query = query == null ? "" : query.strip();
+        if (query.isEmpty())
         {
             LOG.debug("Search rejected: empty query");
             callback.onError("Please include a query.");

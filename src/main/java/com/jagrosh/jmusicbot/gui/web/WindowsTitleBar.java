@@ -4,12 +4,14 @@ import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.Platform;
 import com.sun.jna.Pointer;
+import com.sun.jna.WString;
 import com.sun.jna.ptr.IntByReference;
 
 /**
  * Switches the native Windows title bar between light and dark.
  *
- * <p>JavaFX does not expose the window handle, so the window is found by its title and the
+ * <p>JavaFX does not expose the window handle, so the window is found by its title and owning
+ * process, and the
  * DWM immersive-dark-mode attribute is set on it. On other platforms this is a no-op.
  */
 final class WindowsTitleBar
@@ -19,7 +21,9 @@ final class WindowsTitleBar
 
     private interface User32 extends Library
     {
-        Pointer FindWindowA(String className, String windowName);
+        Pointer FindWindowExW(Pointer parent, Pointer childAfter, WString className, WString windowName);
+
+        int GetWindowThreadProcessId(Pointer hwnd, IntByReference processId);
     }
 
     private interface Dwmapi extends Library
@@ -42,7 +46,7 @@ final class WindowsTitleBar
         try
         {
             User32 user32 = (User32) Native.loadLibrary("user32", User32.class);
-            Pointer hwnd = user32.FindWindowA(null, title);
+            Pointer hwnd = findOwnWindow(user32, title);
             if (hwnd == null)
                 return;
 
@@ -60,5 +64,27 @@ final class WindowsTitleBar
         {
             // The title bar stays in the system style.
         }
+    }
+
+    /**
+     * Finds the top-level window with this title that belongs to this process. Another program
+     * (a browser tab, an Explorer folder) can show the same title, so the owner is checked.
+     */
+    private static Pointer findOwnWindow(User32 user32, String title)
+    {
+        long self = ProcessHandle.current().pid();
+        WString name = new WString(title);
+        Pointer hwnd = null;
+        for (int i = 0; i < 64; i++)
+        {
+            hwnd = user32.FindWindowExW(null, hwnd, null, name);
+            if (hwnd == null)
+                return null;
+            IntByReference owner = new IntByReference();
+            user32.GetWindowThreadProcessId(hwnd, owner);
+            if (Integer.toUnsignedLong(owner.getValue()) == self)
+                return hwnd;
+        }
+        return null;
     }
 }

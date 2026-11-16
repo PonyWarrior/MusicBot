@@ -287,9 +287,23 @@ public final class UpdateSupport
      */
     public static List<Path> extractZip(Path zip, Path target) throws IOException
     {
+        return extractZip(zip, target, MAX_EXTRACTED_BYTES);
+    }
+
+    /** The largest total size an update archive may expand to; ffmpeg, the biggest, is ~200 MB. */
+    public static final long MAX_EXTRACTED_BYTES = 2L * 1024 * 1024 * 1024;
+
+    /**
+     * Extracts a zip into a directory, refusing entries that would escape it and stopping once
+     * the extracted data passes {@code maxBytes}, so a malformed archive cannot fill the disk.
+     */
+    public static List<Path> extractZip(Path zip, Path target, long maxBytes) throws IOException
+    {
         Path root = target.toAbsolutePath().normalize();
         Files.createDirectories(root);
         List<Path> files = new ArrayList<>();
+        long total = 0;
+        byte[] buffer = new byte[64 * 1024];
         try (ZipInputStream in = new ZipInputStream(Files.newInputStream(zip)))
         {
             ZipEntry entry;
@@ -302,7 +316,17 @@ public final class UpdateSupport
                     continue;
                 }
                 Files.createDirectories(out.getParent());
-                Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
+                try (var stream = Files.newOutputStream(out))
+                {
+                    int read;
+                    while ((read = in.read(buffer)) > 0)
+                    {
+                        total += read;
+                        if (total > maxBytes)
+                            throw new IOException("the archive expands to more than " + maxBytes + " bytes");
+                        stream.write(buffer, 0, read);
+                    }
+                }
                 files.add(out);
             }
         }

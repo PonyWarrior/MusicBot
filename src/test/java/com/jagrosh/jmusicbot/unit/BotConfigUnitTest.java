@@ -361,11 +361,13 @@ class BotConfigUnitTest extends BaseConfigTest {
             
             Set<AudioSource> sources = config.getEnabledAudioSources();
             assertNotNull(sources);
-            assertEquals(AudioSource.values().length, sources.size(),
-                "All sources should be enabled when audioSources key is missing");
+            // http and local are off in reference.conf; every other source defaults on.
+            assertEquals(AudioSource.values().length - 2, sources.size(),
+                "All sources except http and local should be enabled when audioSources key is missing");
             for (AudioSource source : AudioSource.values()) {
-                assertTrue(config.isAudioSourceEnabled(source),
-                    source.getConfigName() + " should be enabled");
+                boolean expected = source != AudioSource.HTTP && source != AudioSource.LOCAL;
+                assertEquals(expected, config.isAudioSourceEnabled(source),
+                    source.getConfigName() + (expected ? " should be enabled" : " should be disabled"));
             }
         }
         

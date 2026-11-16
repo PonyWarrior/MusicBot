@@ -75,13 +75,17 @@ jobs:
 
       - name: Sanitize tag suffix
         id: sanitize
+        # Inputs arrive through env, never spliced into the script, so they cannot inject shell.
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_REF: ${{ github.event.inputs.ref }}
         run: |
           # Determine the tag suffix: use input.tag if provided, otherwise derive from ref
-          if [[ -n "${{ github.event.inputs.tag }}" ]]; then
-            TAG_SUFFIX="${{ github.event.inputs.tag }}"
+          if [[ -n "$INPUT_TAG" ]]; then
+            TAG_SUFFIX="$INPUT_TAG"
           else
             # Derive from ref: strip refs/heads/, refs/tags/, refs/ prefixes
-            REF="${{ github.event.inputs.ref }}"
+            REF="$INPUT_REF"
             REF="${REF#refs/heads/}"
             REF="${REF#refs/tags/}"
             REF="${REF#refs/}"
@@ -125,7 +129,10 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Print final tags
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           echo "Successfully published preview Docker image"
-          echo "Tags: ${{ steps.meta.outputs.tags }}"
-          echo "Image digest: ${{ steps.build.outputs.digest }}"
+          echo "Tags: $TAGS"
+          echo "Image digest: $DIGEST"

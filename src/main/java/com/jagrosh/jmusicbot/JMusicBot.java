@@ -43,6 +43,9 @@ import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.swing.SwingUtilities;
+import java.lang.reflect.InvocationTargetException;
+
 
 /**
  *
@@ -171,15 +174,29 @@ public class JMusicBot
 
     private static void startSwingGui(Bot bot)
     {
-        try
+        // Swing components must be built and shown on the event dispatch thread.
+        Runnable create = () ->
         {
             MainFrame mainFrame = new MainFrame(bot);
             bot.setGUI(mainFrame);
             mainFrame.init();
+        };
+        try
+        {
+            if (SwingUtilities.isEventDispatchThread())
+                create.run();
+            else
+                SwingUtilities.invokeAndWait(create);
+        }
+        catch (InterruptedException e)
+        {
+            Thread.currentThread().interrupt();
+            LOG.error("Interrupted while starting the GUI");
         }
         catch (Exception e)
         {
-            LOG.error("Could not start GUI. Use -Dnogui=true for server environments.", e);
+            Throwable cause = e instanceof InvocationTargetException ? e.getCause() : e;
+            LOG.error("Could not start GUI. Use -Dnogui=true for server environments.", cause);
         }
     }
 

@@ -107,8 +107,11 @@ playback {
     beam = true
     getyarn = true
     nico = true
-    http = true
-    local = true
+    # Off by default: with these on, anyone who can use the play command can make the bot
+    # open any URL (including hosts on your own network) or any file on this PC. The local
+    # music library does not need either of them. See README "Direct links and local files".
+    http = false
+    local = false
   }
 
   # Transforms can rewrite play inputs into other inputs.

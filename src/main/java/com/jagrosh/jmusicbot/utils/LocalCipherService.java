@@ -39,7 +39,15 @@ public class LocalCipherService
     private final int startupTimeoutSeconds;
     private final Path logFile;
 
-    private Process process;
+    /** Restarts allowed within {@link #RESTART_WINDOW_MS} before the watchdog gives up. */
+    static final int MAX_RESTARTS = 5;
+    static final long RESTART_WINDOW_MS = TimeUnit.MINUTES.toMillis(10);
+
+    private volatile Process process;
+    /** Set by {@link #stop()}; an intentional stop must never be undone by the watchdog. */
+    private volatile boolean stopped;
+    private boolean shutdownHookAdded;
+    private final List<Long> restartTimes = new ArrayList<>();
 
     /**
      * @param directory the working directory of the service (the yt-cipher checkout)
@@ -65,8 +73,9 @@ public class LocalCipherService
      *
      * @return true if the service is up and running
      */
-    public boolean start()
+    public synchronized boolean start()
     {
+        stopped = false;
         if (isPortOpen())
         {
             if (killOrphanedService())
@@ -124,8 +133,15 @@ public class LocalCipherService
                 builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
             }
 
-            process = builder.start();
-            Runtime.getRuntime().addShutdownHook(new Thread(this::stop, "local-cipher-shutdown"));
+            Process started = builder.start();
+            process = started;
+            if (!shutdownHookAdded)
+            {
+                Runtime.getRuntime().addShutdownHook(new Thread(this::stop, "local-cipher-shutdown"));
+                shutdownHookAdded = true;
+            }
+            // Watchdog: a crash (not a stop) restarts the service.
+            started.onExit().thenAccept(this::onProcessExit);
 
             LOG.info("Started local cipher service: {} (in {})", String.join(" ", command), directory.toAbsolutePath());
         }
@@ -183,6 +199,7 @@ public class LocalCipherService
      */
     public void stop()
     {
+        stopped = true;
         Process p = process;
         if (p == null)
         {
@@ -207,6 +224,72 @@ public class LocalCipherService
             p.destroyForcibly();
         }
         LOG.info("Stopped local cipher service");
+    }
+
+    /**
+     * Called when a process this instance started has exited. A process that was replaced or
+     * stopped on purpose is ignored; otherwise the service crashed and is restarted, up to
+     * {@link #MAX_RESTARTS} times in {@link #RESTART_WINDOW_MS}.
+     */
+    private void onProcessExit(Process exited)
+    {
+        if (stopped || process != exited)
+        {
+            return;
+        }
+        LOG.warn("Local cipher service exited unexpectedly (exit code {})", exited.exitValue());
+        logCipherOutputTail();
+        process = null;
+
+        if (!allowRestart(restartTimes, System.currentTimeMillis()))
+        {
+            LOG.error("Local cipher service crashed {} times in {} minutes; not restarting it again. "
+                    + "Use the Restart button or restart the bot.", MAX_RESTARTS,
+                    TimeUnit.MILLISECONDS.toMinutes(RESTART_WINDOW_MS));
+            return;
+        }
+
+        Thread restart = new Thread(() ->
+        {
+            try
+            {
+                Thread.sleep(2000);
+            }
+            catch (InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (stopped)
+            {
+                return;
+            }
+            LOG.info("Restarting the local cipher service");
+            start();
+        }, "local-cipher-watchdog");
+        restart.setDaemon(true);
+        restart.start();
+    }
+
+    /**
+     * Records a restart attempt and decides whether it is allowed.
+     *
+     * @param history earlier restart times, pruned and appended to in place
+     * @param now the current time in milliseconds
+     * @return true while fewer than {@link #MAX_RESTARTS} restarts happened in the window
+     */
+    static boolean allowRestart(List<Long> history, long now)
+    {
+        synchronized (history)
+        {
+            history.removeIf(time -> now - time > RESTART_WINDOW_MS);
+            if (history.size() >= MAX_RESTARTS)
+            {
+                return false;
+            }
+            history.add(now);
+            return true;
+        }
     }
 
     /**
@@ -323,6 +406,46 @@ public class LocalCipherService
     }
 
     /**
+     * Reads the process ids listening on a port from {@code netstat -ano -p TCP} output.
+     *
+     * <p>The state column is translated on localized Windows ("ÉCOUTE", "ABHÖREN"), so a
+     * listening row is recognised by its foreign address instead, which is always
+     * {@code 0.0.0.0:0} or {@code [::]:0} while listening.
+     *
+     * @param output the netstat output
+     * @param port the local port
+     * @return the process ids listening on the port
+     */
+    public static List<Integer> parseListeningPids(String output, int port)
+    {
+        List<Integer> owners = new ArrayList<>();
+        for (String line : output.lines().toList())
+        {
+            String[] parts = line.trim().split("\\s+");
+            // Proto, local address, foreign address, state, pid. Checking the whole local
+            // column avoids matching a different port such as 80010.
+            if (parts.length < 5 || !parts[0].equalsIgnoreCase("TCP")
+                    || !parts[1].endsWith(":" + port) || !parts[2].endsWith(":0"))
+            {
+                continue;
+            }
+            try
+            {
+                int pid = Integer.parseInt(parts[parts.length - 1]);
+                if (!owners.contains(pid))
+                {
+                    owners.add(pid);
+                }
+            }
+            catch (NumberFormatException e)
+            {
+                // Not a process id.
+            }
+        }
+        return owners;
+    }
+
+    /**
      * Finds the process ids listening on the configured port.
      *
      * <p>Implemented with {@code netstat} on Windows; other platforms simply report nothing,
@@ -344,33 +467,13 @@ public class LocalCipherService
             builder.redirectErrorStream(true);
             Process netstat = builder.start();
 
-            List<String> output = new ArrayList<>();
+            String output;
             try (var in = netstat.getInputStream())
             {
-                output.addAll(new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).lines()
-                        .filter(line -> line.contains("LISTENING"))
-                        .toList());
+                output = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
             }
             netstat.waitFor(10, TimeUnit.SECONDS);
-
-            for (String line : output)
-            {
-                String[] parts = line.trim().split("\\s+");
-                // parts[1] is the local address, e.g. 127.0.0.1:8001. Checking the whole column
-                // avoids matching a different port such as 80010.
-                if (parts.length < 2 || !parts[1].endsWith(":" + port))
-                {
-                    continue;
-                }
-                try
-                {
-                    owners.add(Integer.parseInt(parts[parts.length - 1]));
-                }
-                catch (NumberFormatException e)
-                {
-                    // Not a process id.
-                }
-            }
+            owners.addAll(parseListeningPids(output, port));
         }
         catch (Exception e)
         {

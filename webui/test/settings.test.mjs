@@ -85,6 +85,11 @@ test('labels, sections and ids come from the key', () => {
   const key = entry('playback.youtube.localCipher.env.DENO_DIR', 'string');
   assert.equal(sectionOf(key), 'playback');
   assert.equal(fieldLabel(key), 'youtube.localCipher.env.DENO_DIR');
-  assert.equal(fieldId(key), 'setting-playback-youtube-localCipher-env-DENO-DIR');
+  assert.equal(fieldId(key), 'setting-playback-youtube-localCipher-env-DENO_5fDIR');
   assert.equal(fieldLabel(entry('standalone', 'string')), 'standalone');
+});
+
+test('ids do not collide for keys that differ only in punctuation', () => {
+  const ids = ['a.b.c', 'a.b-c', 'a.b_c', 'a.b"c'].map((key) => fieldId(entry(key, 'string')));
+  assert.equal(new Set(ids).size, ids.length);
 });

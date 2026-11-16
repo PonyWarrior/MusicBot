@@ -289,13 +289,18 @@ public class MainFrame extends JFrame {
         
         if (result == JOptionPane.YES_OPTION) {
             LOG.info("User requested shutdown");
-            try {
-                bot.shutdown();
-            } catch (Exception ex) {
-                LOG.error("Error during shutdown", ex);
-            }
-            dispose();
-            System.exit(0);
+            setVisible(false);
+            // Shutdown closes Discord connections and ends in System.exit; doing that on the
+            // event dispatch thread freezes the window and can deadlock exit hooks that need it.
+            Thread shutdown = new Thread(() -> {
+                try {
+                    bot.shutdown();
+                } catch (Exception ex) {
+                    LOG.error("Error during shutdown", ex);
+                }
+                System.exit(0);
+            }, "gui-shutdown");
+            shutdown.start();
         }
     }
     

@@ -302,8 +302,8 @@ class ConfigRendererTest {
                 "User's soundcloud=false should be preserved");
             
             // Verify template defaults are preserved for missing keys
-            assertTrue(audioSources.getBoolean("local"), 
-                "Template's local=true should be preserved (was missing from user config)");
+            assertFalse(audioSources.getBoolean("local"), 
+                "Template's local=false should be preserved (was missing from user config)");
             assertTrue(audioSources.getBoolean("bandcamp"), 
                 "Template's bandcamp=true should be preserved (was missing from user config)");
             assertTrue(audioSources.getBoolean("vimeo"), 
@@ -316,8 +316,8 @@ class ConfigRendererTest {
                 "Template's getyarn=true should be preserved (was missing from user config)");
             assertTrue(audioSources.getBoolean("nico"), 
                 "Template's nico=true should be preserved (was missing from user config)");
-            assertTrue(audioSources.getBoolean("http"), 
-                "Template's http=true should be preserved (was missing from user config)");
+            assertFalse(audioSources.getBoolean("http"), 
+                "Template's http=false should be preserved (was missing from user config)");
         }
         
         @Test
@@ -352,8 +352,8 @@ class ConfigRendererTest {
             // Verify all other template defaults are preserved
             assertTrue(audioSources.getBoolean("soundcloud"), 
                 "Template's soundcloud=true should be preserved");
-            assertTrue(audioSources.getBoolean("local"), 
-                "Template's local=true should be preserved");
+            assertFalse(audioSources.getBoolean("local"), 
+                "Template's local=false should be preserved");
             assertTrue(audioSources.getBoolean("bandcamp"), 
                 "Template's bandcamp=true should be preserved");
         }

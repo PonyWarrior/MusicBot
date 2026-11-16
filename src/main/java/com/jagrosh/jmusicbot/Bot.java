@@ -26,6 +26,7 @@ import com.jagrosh.jmusicbot.audio.PlayerManager;
 import com.jagrosh.jmusicbot.audio.TrackLoadingMonitor;
 import com.jagrosh.jmusicbot.entities.UserInteraction;
 import javax.swing.JFrame;
+import javax.swing.SwingUtilities;
 import com.jagrosh.jmusicbot.playlist.PlaylistLoader;
 import com.jagrosh.jmusicbot.settings.SettingsManager;
 import com.jagrosh.jmusicbot.service.MusicService;
@@ -339,7 +340,13 @@ public class Bot
             threadpool.shutdownNow();
 
             if (gui != null)
-                gui.dispose();
+            {
+                JFrame frame = gui;
+                if (SwingUtilities.isEventDispatchThread())
+                    frame.dispose();
+                else
+                    SwingUtilities.invokeLater(frame::dispose);
+            }
             if (webServer != null)
                 webServer.stop();
         }

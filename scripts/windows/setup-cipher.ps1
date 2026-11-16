@@ -13,32 +13,43 @@
 param(
     [string]$Directory = (Join-Path (Get-Location) "cipher\yt-cipher"),
     [string]$Deno = "deno",
+    # The reviewed yt-cipher commit. Keep it equal to UpdateManager.PINNED_CIPHER_COMMIT: the
+    # in-app updater installs exactly this commit, never upstream HEAD.
+    [string]$CipherCommit = "1e1fd8e2f34ca90cf23545be72e46307bd3d3d2a",
     [string]$EjsCommit = "cd4e87f52e87ab6d8b318fd3a817adda6fafa8dc"
 )
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "==> Cloning yt-cipher into $Directory"
-if (Test-Path $Directory) {
-    Write-Host "    already present, updating"
-    git -C $Directory pull --ff-only
+Write-Host "==> Cloning yt-cipher $CipherCommit into $Directory"
+if (Test-Path (Join-Path $Directory ".git")) {
+    Write-Host "    already present, fetching the pinned commit"
+    git -C $Directory fetch origin $CipherCommit
+    if ($LASTEXITCODE -ne 0) { throw "git fetch of yt-cipher $CipherCommit failed." }
 } else {
     git clone https://github.com/kikkia/yt-cipher.git $Directory
+    if ($LASTEXITCODE -ne 0) { throw "git clone of yt-cipher failed." }
 }
+git -C $Directory checkout --detach $CipherCommit
+if ($LASTEXITCODE -ne 0) { throw "git checkout of yt-cipher $CipherCommit failed." }
 
 Write-Host "==> Cloning the pinned ejs commit"
 $ejsDir = Join-Path $Directory "ejs"
 if (Test-Path (Join-Path $ejsDir ".git")) {
     git -C $ejsDir fetch --depth 1 origin $EjsCommit
+    if ($LASTEXITCODE -ne 0) { throw "git fetch of ejs $EjsCommit failed." }
 } else {
     git clone https://github.com/yt-dlp/ejs.git $ejsDir
+    if ($LASTEXITCODE -ne 0) { throw "git clone of ejs failed." }
 }
 git -C $ejsDir checkout --detach $EjsCommit
+if ($LASTEXITCODE -ne 0) { throw "git checkout of ejs $EjsCommit failed." }
 
 Write-Host "==> Patching ejs for Deno's npm compatibility"
 Push-Location $Directory
 try {
     & $Deno run --allow-read --allow-write ./scripts/patch-ejs.ts
+    if ($LASTEXITCODE -ne 0) { throw "patch-ejs.ts failed (exit code $LASTEXITCODE)." }
 } finally {
     Pop-Location
 }

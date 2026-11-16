@@ -61,6 +61,8 @@ public class WebServer
 {
     private static final Logger LOG = LoggerFactory.getLogger(WebServer.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    /** Serializes config.txt read-modify-write cycles from the settings endpoint. */
+    private static final Object SETTINGS_LOCK = new Object();
 
     /** Where the build puts the web UI inside the jar. */
     private static final String EMBEDDED_ROOT = "/web/";
@@ -336,12 +338,17 @@ public class WebServer
                 if (!(body.get("values") instanceof Map<?, ?> values))
                     throw new IllegalArgumentException("missing values");
 
-                String updated = applySettings(
-                        Files.readString(path, StandardCharsets.UTF_8), loadDefaults(), values);
-                // Write next to the file and swap it in, so a crash cannot leave half a config.
-                Path temp = path.resolveSibling(path.getFileName() + ".tmp");
-                Files.writeString(temp, updated, StandardCharsets.UTF_8);
-                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                // Read, edit and write as one step: two saves at once would otherwise both edit
+                // the same old text, and the second would drop the first one's changes.
+                synchronized (SETTINGS_LOCK)
+                {
+                    String updated = applySettings(
+                            Files.readString(path, StandardCharsets.UTF_8), loadDefaults(), values);
+                    // Write next to the file and swap it in, so a crash cannot leave half a config.
+                    Path temp = path.resolveSibling(path.getFileName() + ".tmp");
+                    Files.writeString(temp, updated, StandardCharsets.UTF_8);
+                    Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                }
                 sendJson(exchange, 200, Map.of("ok", true, "restartRequired", true));
             }
             catch (Exception e)
@@ -966,7 +973,7 @@ public class WebServer
             Map<String, Object> item = new LinkedHashMap<>();
             // Stable for the life of the track, so the page can keep a row instead of
             // remounting every row when the queue shifts.
-            item.put("id", Integer.toHexString(System.identityHashCode(queued)));
+            item.put("id", Long.toString(queued.getId()));
             item.put("position", position++);
             item.put("title", track.getInfo().title);
             item.put("author", track.getInfo().author);
@@ -992,7 +999,7 @@ public class WebServer
         {
             AudioTrack track = queued.getTrack();
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("id", Integer.toHexString(System.identityHashCode(queued)));
+            item.put("id", Long.toString(queued.getId()));
             item.put("title", track.getInfo().title);
             item.put("author", track.getInfo().author);
             item.put("durationMs", durationOf(track));
@@ -1085,13 +1092,42 @@ public class WebServer
             return List.of();
         try
         {
-            List<String> all = Files.readAllLines(log, StandardCharsets.UTF_8);
-            int from = Math.max(0, all.size() - lines);
-            return new ArrayList<>(all.subList(from, all.size()));
+            return tailLines(log, lines);
         }
         catch (IOException e)
         {
             return List.of("Could not read the log: " + e.getMessage());
+        }
+    }
+
+    /** The most a log poll reads from the end of the file; 2000 lines fit comfortably. */
+    public static final int LOG_TAIL_BYTES = 512 * 1024;
+
+    /**
+     * Returns the last {@code lines} lines of a file while reading only its final
+     * {@link #LOG_TAIL_BYTES}, so the once-a-second log poll does not grow with the log.
+     */
+    public static List<String> tailLines(Path file, int lines) throws IOException
+    {
+        try (java.nio.channels.SeekableByteChannel channel = Files.newByteChannel(file))
+        {
+            long size = channel.size();
+            long start = Math.max(0, size - LOG_TAIL_BYTES);
+            java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate((int) (size - start));
+            channel.position(start);
+            while (buffer.hasRemaining() && channel.read(buffer) > 0)
+            {
+                // keep reading
+            }
+            String text = new String(buffer.array(), 0, buffer.position(), StandardCharsets.UTF_8);
+            List<String> all = new ArrayList<>(List.of(text.split("\\r?\\n", -1)));
+            // The first line is usually cut in half when the read started mid-file.
+            if (start > 0 && !all.isEmpty())
+                all.remove(0);
+            if (!all.isEmpty() && all.get(all.size() - 1).isEmpty())
+                all.remove(all.size() - 1);
+            int from = Math.max(0, all.size() - lines);
+            return new ArrayList<>(all.subList(from, all.size()));
         }
     }
 

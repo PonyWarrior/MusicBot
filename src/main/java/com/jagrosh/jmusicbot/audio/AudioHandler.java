@@ -37,10 +37,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
-import java.util.HashSet;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  *
@@ -53,8 +54,9 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
     public final static String STOP_EMOJI  = "\u23F9"; // ⏹
 
     private final static Logger LOGGER = LoggerFactory.getLogger(AudioHandler.class);
-    private final List<AudioTrack> defaultQueue = new LinkedList<>();
-    private final Set<String> votes = new HashSet<>();
+    // Touched from JDA threads, playlist-loader callbacks and the audio thread.
+    private final List<AudioTrack> defaultQueue = Collections.synchronizedList(new LinkedList<>());
+    private final Set<String> votes = ConcurrentHashMap.newKeySet();
     
     private final PlayerManager manager;
     private final AudioPlayer audioPlayer;
@@ -64,7 +66,7 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
 
     private AudioFrame lastFrame;
     private volatile AbstractQueue<QueuedTrack> queue;
-    private String lastReason = null;
+    private volatile String lastReason = null;
     /** The favorites entry of one track; it only counts while that track is the one playing. */
     private record FavoriteMark(String trackUri, String entry) { }
 
@@ -97,7 +99,9 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         this.lastReason = reason;
     }
 
-    public int addTrackToFront(QueuedTrack qtrack)
+    // Adds share the handler lock with setQueueType, so a switch cannot drop a track added
+    // to the old queue after it was copied.
+    public synchronized int addTrackToFront(QueuedTrack qtrack)
     {
         if(audioPlayer.getPlayingTrack()==null)
         {
@@ -112,7 +116,7 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
         }
     }
     
-    public int addTrack(QueuedTrack qtrack)
+    public synchronized int addTrack(QueuedTrack qtrack)
     {
         if(audioPlayer.getPlayingTrack()==null)
         {
@@ -165,7 +169,12 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
     {
         // Check that the selfMember is connected to a channel where they can receive audio
         // Check that the audioPlayer has a playingTrack
-        var isBotConnectedToVoice = jda.getGuildById(guildId).getSelfMember().getVoiceState().getChannel() != null;
+        // The guild can be gone (bot kicked, guild unavailable) while a handler still exists.
+        var guild = jda.getGuildById(guildId);
+        if (guild == null)
+            return false;
+        var voiceState = guild.getSelfMember().getVoiceState();
+        var isBotConnectedToVoice = voiceState != null && voiceState.getChannel() != null;
         var isAudioPlaying = audioPlayer.getPlayingTrack() != null;
         return isBotConnectedToVoice && isAudioPlaying;
     }
@@ -190,9 +199,14 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
     
     public boolean playFromDefault()
     {
-        if(!defaultQueue.isEmpty())
+        AudioTrack next;
+        synchronized (defaultQueue)
         {
-            audioPlayer.playTrack(defaultQueue.remove(0));
+            next = defaultQueue.isEmpty() ? null : defaultQueue.remove(0);
+        }
+        if(next != null)
+        {
+            audioPlayer.playTrack(next);
             return true;
         }
         Settings settings = manager.getBot().getSettingsManager().getSettings(guildId);
@@ -262,7 +276,16 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
             }
         }
         
-        if(queue.isEmpty())
+        // Pull once: the queue can be cleared from another thread between a check and a pull.
+        QueuedTrack qt = null;
+        if(!queue.isEmpty())
+        {
+            if(endReason == AudioTrackEndReason.REPLACED)
+                return;
+            qt = queue.pull();
+        }
+
+        if(qt == null)
         {
             if(!playFromDefault())
             {
@@ -275,9 +298,8 @@ public class AudioHandler extends AudioEventAdapter implements AudioSendHandler
                 player.setPaused(false);
             }
         }
-        else if (endReason != AudioTrackEndReason.REPLACED)
+        else
         {
-            QueuedTrack qt = queue.pull();
             if (lastReason == null || (!lastReason.startsWith("Repeating") && !lastReason.startsWith("Skipped")))
                 lastReason = "Playing next song.";
             player.playTrack(qt.getTrack());

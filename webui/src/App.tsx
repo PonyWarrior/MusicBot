@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Theme } from '@astryxdesign/core/theme';
 import { neutralTheme } from '@astryxdesign/theme-neutral/built';
 import { Avatar } from '@astryxdesign/core/Avatar';
@@ -13,7 +13,6 @@ import { Text } from '@astryxdesign/core/Text';
 import { useToast } from '@astryxdesign/core/Toast';
 import { VStack } from '@astryxdesign/core/VStack';
 import { fetchLogs, fetchState, fetchTheme, restartBot, runAction, saveTheme, type State } from './api';
-import Advanced from './Advanced';
 import ConfirmDialog, { type ConfirmRequest } from './ConfirmDialog';
 import Dashboard from './Dashboard';
 import Dropdown from './Dropdown';
@@ -21,6 +20,9 @@ import { formatVersion } from './format';
 import { MoonIcon, SunIcon } from './Icons';
 import type { SettingsHandle } from './SettingsPanel';
 import { share } from './share';
+
+// Settings, history and updates are only needed once the tab is opened, so they load then.
+const Advanced = lazy(() => import('./Advanced'));
 
 type Mode = 'light' | 'dark';
 
@@ -54,6 +56,8 @@ export default function App() {
     toastRef.current = toast;
   });
   const stateBusy = useRef(false);
+  const statePending = useRef(false);
+  const guildRef = useRef(guildId);
   const logsBusy = useRef(false);
   const settings = useRef<SettingsHandle>(null);
 
@@ -73,11 +77,13 @@ export default function App() {
   }, []);
 
   // The window's own right-click menu offers "Reload page", which would throw unsaved
-  // settings away. Text fields keep their menu, for copy and paste.
+  // settings away. Text fields keep their menu, for copy and paste, and so does selected text
+  // (logs, titles) so it can be copied.
   useEffect(() => {
     const onContextMenu = (event: MouseEvent) => {
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      if ((window.getSelection()?.toString() ?? '') !== '') return;
       event.preventDefault();
     };
     document.addEventListener('contextmenu', onContextMenu);
@@ -96,19 +102,36 @@ export default function App() {
   };
 
   const refresh = useCallback(async () => {
-    if (stateBusy.current) return;
+    // One request at a time. A refresh asked for meanwhile (a guild switch, an action) is run
+    // as soon as the current one ends instead of being dropped.
+    if (stateBusy.current) {
+      statePending.current = true;
+      return;
+    }
     stateBusy.current = true;
     try {
       const next = await fetchState(guildId);
-      // Parts that did not change keep their identity, so only what changed renders again.
-      setState((current) => share(current, next));
-      setError(null);
+      // A reply for a guild that is no longer selected would flash the wrong player.
+      if (guildRef.current === guildId) {
+        // Parts that did not change keep their identity, so only what changed renders again.
+        setState((current) => share(current, next));
+        setError(null);
+      }
     } catch (e) {
-      setError(messageOf(e));
+      if (guildRef.current === guildId) setError(messageOf(e));
     } finally {
       stateBusy.current = false;
+      if (statePending.current) {
+        statePending.current = false;
+        void refreshRef.current();
+      }
     }
   }, [guildId]);
+  const refreshRef = useRef(refresh);
+  useEffect(() => {
+    guildRef.current = guildId;
+    refreshRef.current = refresh;
+  });
 
   useEffect(() => {
     // This starts a request; the state is set when the bot answers, not during the effect.
@@ -290,13 +313,15 @@ export default function App() {
               {tab === 'dashboard' && <Dashboard state={state} logs={logs} act={act} stop={stop} />}
               {advancedOpened && (
                 <div hidden={tab !== 'advanced'}>
-                  <Advanced
-                    state={state}
-                    logs={logs}
-                    visible={tab === 'advanced'}
-                    restartNow={restartNow}
-                    settings={settings}
-                  />
+                  <Suspense fallback={<Text color="secondary">Loading…</Text>}>
+                    <Advanced
+                      state={state}
+                      logs={logs}
+                      visible={tab === 'advanced'}
+                      restartNow={restartNow}
+                      settings={settings}
+                    />
+                  </Suspense>
                 </div>
               )}
             </>
