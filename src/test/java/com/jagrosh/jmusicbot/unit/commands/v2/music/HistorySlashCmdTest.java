@@ -100,17 +100,15 @@ public class HistorySlashCmdTest
 
         command.doCommand(fixture.getEvent());
 
-        ArgumentCaptor<MessageEmbed> embedCaptor = ArgumentCaptor.forClass(MessageEmbed.class);
-        verify(fixture.getEvent()).replyEmbeds(embedCaptor.capture());
-        MessageEmbed embed = embedCaptor.getValue();
-        assertEquals("History Queue", embed.getTitle());
-        assertTrue(embed.getDescription().contains("Track 1"));
-        assertTrue(embed.getDescription().contains("Recently played"));
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<ActionRow>> componentsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(fixture.getReplyAction()).setComponents(componentsCaptor.capture());
-        assertFalse(componentsCaptor.getValue().isEmpty());
+        ArgumentCaptor<net.dv8tion.jda.api.utils.messages.MessageCreateData> replyCaptor =
+                ArgumentCaptor.forClass(net.dv8tion.jda.api.utils.messages.MessageCreateData.class);
+        verify(fixture.getEvent()).reply(replyCaptor.capture());
+        assertTrue(replyCaptor.getValue().isUsingComponentsV2());
+        String text = com.jagrosh.jmusicbot.testutil.V2Messages.text(replyCaptor.getValue().getComponents());
+        assertTrue(text.contains("History Queue"));
+        assertTrue(text.contains("Track 1"));
+        assertTrue(text.contains("Recently played"));
+        assertFalse(com.jagrosh.jmusicbot.testutil.V2Messages.rows(replyCaptor.getValue().getComponents()).isEmpty());
     }
 
     @Test

@@ -86,9 +86,7 @@ public class QueueCmd extends MusicCommand
 
             if (embed != null)
             {
-                MessageCreateData built = new MessageCreateBuilder()
-                        .setContent(event.getClient().getWarning() + " There is no music in the queue!")
-                        .setEmbeds(embed.getEmbeds().get(0)).build();
+                MessageCreateData built = com.jagrosh.jmusicbot.utils.ComponentsV2.withNotice(event.getClient().getWarning() + " There is no music in the queue!", embed);
                 event.reply(built, m ->
                 {
                     if (npInfo != null && npInfo.isPlaying)

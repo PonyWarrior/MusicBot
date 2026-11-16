@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.listener;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.commands.v2.music.QueueSlashCmd;
 import com.jagrosh.jmusicbot.listener.interaction.ComponentIdParsers;
@@ -89,7 +90,7 @@ public class QueueInteractionListener extends ListenerAdapter {
         MusicService.QueueInfo queueInfo = musicService.getQueueInfo(event.getGuild(), event.getJDA());
 
         if (queueInfo == null || queueInfo.isEmpty()) {
-            event.editMessage("The queue is now empty!").setEmbeds().setComponents().queue();
+            event.editMessage(ComponentsV2.text("The queue is now empty!")).queue();
             return;
         }
 
@@ -143,7 +144,7 @@ public class QueueInteractionListener extends ListenerAdapter {
             musicService.removeTrack(event.getGuild(), event.getMember(), selectedTrack, adapter);
             MusicService.QueueInfo newQueueInfo = musicService.getQueueInfo(event.getGuild(), event.getJDA());
             if (newQueueInfo == null || newQueueInfo.isEmpty()) {
-                event.editMessage("The queue is now empty!").setEmbeds().setComponents().queue();
+                event.editMessage(ComponentsV2.text("The queue is now empty!")).queue();
             } else {
                 int newTotalPages = QueueSlashCmd.getTotalPages(newQueueInfo.tracks.length);
                 int safePage = Math.min(page, newTotalPages);
@@ -178,9 +179,7 @@ public class QueueInteractionListener extends ListenerAdapter {
             }
             MessageEmbed embed = QueueSlashCmd.buildQueueEmbed(queueInfo, page, totalPages, selectedTrack,
                     event.getMember().getColor());
-            event.editMessageEmbeds(embed)
-                    .setComponents(ActionRow.of(menuBuilder.build()))
-                    .queue();
+            event.editMessage(ComponentsV2.edit(null, embed, List.of(ActionRow.of(menuBuilder.build())))).queue();
         } else if (action.equals("playnow")) {
             if (selectedTrack <= 0 || selectedTrack > queueInfo.tracks.length) {
                 event.reply("No track selected!").setEphemeral(true).queue();
@@ -190,7 +189,7 @@ public class QueueInteractionListener extends ListenerAdapter {
             musicService.playNow(event.getGuild(), event.getMember(), selectedTrack, adapter);
             MusicService.QueueInfo newQueueInfo = musicService.getQueueInfo(event.getGuild(), event.getJDA());
             if (newQueueInfo == null || newQueueInfo.isEmpty()) {
-                event.editMessage("The queue is now empty!").setEmbeds().setComponents().queue();
+                event.editMessage(ComponentsV2.text("The queue is now empty!")).queue();
             } else {
                 int newTotalPages = QueueSlashCmd.getTotalPages(newQueueInfo.tracks.length);
                 updateQueueEmbed(event, newQueueInfo, 1, newTotalPages, 0, userId);
@@ -238,7 +237,7 @@ public class QueueInteractionListener extends ListenerAdapter {
 
         MusicService.QueueInfo queueInfo = musicService.getQueueInfo(event.getGuild(), event.getJDA());
         if (queueInfo == null || queueInfo.isEmpty()) {
-            event.editMessage("The queue is now empty!").setEmbeds().setComponents().queue();
+            event.editMessage(ComponentsV2.text("The queue is now empty!")).queue();
             return;
         }
 
@@ -250,7 +249,7 @@ public class QueueInteractionListener extends ListenerAdapter {
                 event.getMember().getColor());
         List<ActionRow> components = QueueSlashCmd.buildQueueComponents(safePage, totalPages, tracksOnPage, 0, userId);
 
-        event.editMessageEmbeds(embed).setComponents(components).queue();
+        event.editMessage(ComponentsV2.edit(null, embed, components)).queue();
     }
 
     private void updateQueueEmbed(ButtonInteractionEvent event, MusicService.QueueInfo queueInfo,
@@ -259,6 +258,6 @@ public class QueueInteractionListener extends ListenerAdapter {
         MessageEmbed embed = QueueSlashCmd.buildQueueEmbed(queueInfo, page, totalPages, selectedTrack,
                 event.getMember().getColor());
         List<ActionRow> components = QueueSlashCmd.buildQueueComponents(page, totalPages, tracksOnPage, selectedTrack, userId);
-        event.editMessageEmbeds(embed).setComponents(components).queue();
+        event.editMessage(ComponentsV2.edit(null, embed, components)).queue();
     }
 }

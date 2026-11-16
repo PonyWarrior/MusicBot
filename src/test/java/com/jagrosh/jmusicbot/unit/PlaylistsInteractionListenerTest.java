@@ -89,8 +89,7 @@ class PlaylistsInteractionListenerTest
         when(fixture.getButtonInteractionEvent().getChannel()).thenReturn(channelUnion);
 
         MessageEditCallbackAction editAction = mock(MessageEditCallbackAction.class);
-        when(fixture.getButtonInteractionEvent().editMessageEmbeds(any(MessageEmbed[].class))).thenReturn(editAction);
-        when(editAction.setComponents(anyList())).thenReturn(editAction);
+        when(fixture.getButtonInteractionEvent().editMessage(any(net.dv8tion.jda.api.utils.messages.MessageEditData.class))).thenReturn(editAction);
         doNothing().when(editAction).queue();
 
         listener.onButtonInteraction(fixture.getButtonInteractionEvent());
@@ -138,8 +137,7 @@ class PlaylistsInteractionListenerTest
         when(fixture.getButtonInteractionEvent().getMessageIdLong()).thenReturn(456L);
 
         MessageEditCallbackAction editAction = mock(MessageEditCallbackAction.class);
-        when(fixture.getButtonInteractionEvent().editMessageEmbeds(any(MessageEmbed[].class))).thenReturn(editAction);
-        when(editAction.setComponents(anyList())).thenReturn(editAction);
+        when(fixture.getButtonInteractionEvent().editMessage(any(net.dv8tion.jda.api.utils.messages.MessageEditData.class))).thenReturn(editAction);
         doNothing().when(editAction).queue();
 
         listener.onButtonInteraction(fixture.getButtonInteractionEvent());
@@ -213,8 +211,7 @@ class PlaylistsInteractionListenerTest
         when(fixture.getButtonInteractionEvent().getMessageIdLong()).thenReturn(456L);
 
         MessageEditCallbackAction editAction = mock(MessageEditCallbackAction.class);
-        when(fixture.getButtonInteractionEvent().editMessageEmbeds(any(MessageEmbed[].class))).thenReturn(editAction);
-        when(editAction.setComponents(anyList())).thenReturn(editAction);
+        when(fixture.getButtonInteractionEvent().editMessage(any(net.dv8tion.jda.api.utils.messages.MessageEditData.class))).thenReturn(editAction);
         doNothing().when(editAction).queue();
 
         listener.onButtonInteraction(fixture.getButtonInteractionEvent());
@@ -259,8 +256,7 @@ class PlaylistsInteractionListenerTest
         when(fixture.getButtonInteractionEvent().getMessageIdLong()).thenReturn(456L);
 
         MessageEditCallbackAction editAction = mock(MessageEditCallbackAction.class);
-        when(fixture.getButtonInteractionEvent().editMessageEmbeds(any(MessageEmbed[].class))).thenReturn(editAction);
-        when(editAction.setComponents(anyList())).thenReturn(editAction);
+        when(fixture.getButtonInteractionEvent().editMessage(any(net.dv8tion.jda.api.utils.messages.MessageEditData.class))).thenReturn(editAction);
         doNothing().when(editAction).queue();
 
         listener.onButtonInteraction(fixture.getButtonInteractionEvent());
@@ -287,13 +283,12 @@ class PlaylistsInteractionListenerTest
         when(fixture.getButtonInteractionEvent().getMessageIdLong()).thenReturn(456L);
 
         MessageEditCallbackAction editAction = mock(MessageEditCallbackAction.class);
-        when(fixture.getButtonInteractionEvent().editMessageEmbeds(any(MessageEmbed[].class))).thenReturn(editAction);
-        when(editAction.setComponents(anyList())).thenReturn(editAction);
+        when(fixture.getButtonInteractionEvent().editMessage(any(net.dv8tion.jda.api.utils.messages.MessageEditData.class))).thenReturn(editAction);
         doNothing().when(editAction).queue();
 
         listener.onButtonInteraction(fixture.getButtonInteractionEvent());
 
         verify(fixture.getMusicService()).discardPlaylistDraft(draftContext);
-        verify(fixture.getButtonInteractionEvent()).editMessageEmbeds(any(MessageEmbed[].class));
+        verify(fixture.getButtonInteractionEvent()).editMessage(any(net.dv8tion.jda.api.utils.messages.MessageEditData.class));
     }
 }

@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.commands.v2.music;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jdautilities.command.SlashCommandEvent;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.commands.v2.MusicSlashCommand;
@@ -78,7 +79,7 @@ public class PlaylistsSlashCmd extends MusicSlashCommand
 
             MessageEmbed embed = buildPlaylistsEmbed(list, page, totalPages, 0, color);
             List<ActionRow> components = buildPlaylistsComponents(page, totalPages, playlistsOnPage, 0, userId);
-            event.replyEmbeds(embed).setComponents(components).queue();
+            event.reply(ComponentsV2.create(null, embed, components)).queue();
         }
     }
 

@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.commands.v1.general;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jdautilities.command.Command;
 import com.jagrosh.jdautilities.command.CommandEvent;
 import com.jagrosh.jmusicbot.Bot;
@@ -96,6 +97,6 @@ public class SettingsCmd extends Command
                 .setFooter(event.getJDA().getGuilds().size() + " servers | "
                         + event.getJDA().getGuilds().stream().filter(g -> g.getSelfMember().getVoiceState().getChannel() != null).count()
                         + " audio connections", null);
-        event.getChannel().sendMessage(builder.setEmbeds(ebuilder.build()).build()).queue();
+        event.getChannel().sendMessage(ComponentsV2.toV2(builder.setEmbeds(ebuilder.build()).build())).queue();
     }
 }

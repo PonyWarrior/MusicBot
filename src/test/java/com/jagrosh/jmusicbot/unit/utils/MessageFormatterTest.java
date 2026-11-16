@@ -367,7 +367,7 @@ class MessageFormatterTest
 
         NowPlayingInfo info = new NowPlayingInfo(track, guild, paused, volume, queueSize, previousTrackCount,
                 isCurrentTrackFavorited, footerInfo);
-        return MessageFormatter.buildNowPlayingMessage(bot, info);
+        return MessageFormatter.buildNowPlayingLayout(bot, info);
     }
 
     private static String noMusicDescription(boolean minimalMessage, boolean showProgressBar)
@@ -388,7 +388,7 @@ class MessageFormatterTest
         when(guild.getSelfMember().getVoiceState().getChannel().getName()).thenReturn("Music VC");
 
         NowPlayingInfo info = new NowPlayingInfo(null, guild, false, 50, 0, "");
-        MessageCreateData message = MessageFormatter.buildNoMusicPlayingMessage(bot, info);
+        MessageCreateData message = MessageFormatter.buildNoMusicPlayingLayout(bot, info);
         return getSingleEmbed(message).getDescription();
     }
 

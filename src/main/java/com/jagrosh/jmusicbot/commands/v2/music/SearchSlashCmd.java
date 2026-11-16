@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.commands.v2.music;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jdautilities.command.SlashCommandEvent;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.commands.v2.MusicSlashCommand;
@@ -120,9 +121,7 @@ public class SearchSlashCmd extends MusicSlashCommand
                                 embeds.add(result.buildEmbed(event.getMember().getColor()));
                             }
 
-                            hook.editOriginalEmbeds(embeds.stream().map(EmbedBuilder::build).toList())
-                                    .setContent(event.getClient().getSuccess() + " Search results for `" + query + "`")
-                                    .setComponents(ActionRow.of(menuBuilder.build()))
+                            hook.editOriginal(ComponentsV2.editCards(event.getClient().getSuccess() + " Search results for `" + query + "`", embeds.stream().map(EmbedBuilder::build).toList(), List.of(ActionRow.of(menuBuilder.build()))))
                                     .queue(msg ->
                                     {
                                         // Wait for selection
@@ -158,24 +157,18 @@ public class SearchSlashCmd extends MusicSlashCommand
 
                                                         if (result != null)
                                                         {
-                                                            hook.editOriginal(event.getClient().getSuccess() + " " + result.formattedMessage)
-                                                                    .setEmbeds()
-                                                                    .setComponents()
+                                                            hook.editOriginal(ComponentsV2.text(event.getClient().getSuccess() + " " + result.formattedMessage))
                                                                     .queue();
                                                         }
                                                         else
                                                         {
-                                                            hook.editOriginal(event.getClient().getWarning() + " " + musicService.formatTooLongError(selectedTrack))
-                                                                    .setEmbeds()
-                                                                    .setComponents()
+                                                            hook.editOriginal(ComponentsV2.text(event.getClient().getWarning() + " " + musicService.formatTooLongError(selectedTrack)))
                                                                     .queue();
                                                         }
                                                     }
                                                 },
                                                 1, TimeUnit.MINUTES,
-                                                () -> hook.editOriginal("Search timed out.")
-                                                .setEmbeds()
-                                                .setComponents()
+                                                () -> hook.editOriginal(ComponentsV2.text("Search timed out."))
                                                 .queue()
                                         );
                                     });

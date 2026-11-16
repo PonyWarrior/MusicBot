@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.commands.v2.music;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jdautilities.command.SlashCommandEvent;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.commands.v2.MusicSlashCommand;
@@ -92,7 +93,7 @@ public class HistorySlashCmd extends MusicSlashCommand
         MessageEmbed embed = buildHistoryEmbed(historyInfo, page, totalPages, 0, event.getMember().getColor());
         List<ActionRow> components = buildHistoryComponents(page, totalPages, tracksOnPage, 0, userId);
 
-        event.replyEmbeds(embed).setComponents(components).queue();
+        event.reply(ComponentsV2.create(null, embed, components)).queue();
     }
 
     /**

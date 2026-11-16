@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.commands.v1.music;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jdautilities.command.CommandEvent;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.commands.v1.MusicCommand;
@@ -96,10 +97,7 @@ public class HistoryCmd extends MusicCommand
         List<net.dv8tion.jda.api.components.actionrow.ActionRow> components =
                 HistorySlashCmd.buildHistoryComponents(page, totalPages, tracksOnPage, 0, userId);
 
-        MessageCreateData message = new MessageCreateBuilder()
-                .addEmbeds(embed)
-                .setComponents(components)
-                .build();
+        MessageCreateData message = ComponentsV2.create(null, embed, components);
         event.reply(message);
     }
 }

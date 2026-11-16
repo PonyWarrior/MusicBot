@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.commands.v2.music;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jdautilities.command.SlashCommandEvent;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.commands.v2.MusicSlashCommand;
@@ -74,9 +75,7 @@ public class QueueSlashCmd extends MusicSlashCommand
                 MessageCreateData embed = npInfo.isPlaying ? npInfo.nowPlayingMessage : npInfo.noMusicMessage;
                 if (embed != null)
                 {
-                    MessageCreateData built = new MessageCreateBuilder()
-                            .setContent(event.getClient().getWarning() + " There is no music in the queue!")
-                            .setEmbeds(embed.getEmbeds().get(0)).build();
+                    MessageCreateData built = com.jagrosh.jmusicbot.utils.ComponentsV2.withNotice(event.getClient().getWarning() + " There is no music in the queue!", embed);
                     event.reply(built).queue(hook ->
                     {
                         if (npInfo.isPlaying)
@@ -102,7 +101,7 @@ public class QueueSlashCmd extends MusicSlashCommand
         MessageEmbed embed = buildQueueEmbed(queueInfo, page, totalPages, 0, event.getMember().getColor());
         List<ActionRow> components = buildQueueComponents(page, totalPages, tracksOnPage, 0, userId);
 
-        event.replyEmbeds(embed).setComponents(components).queue();
+        event.reply(ComponentsV2.create(null, embed, components)).queue();
     }
 
     /**

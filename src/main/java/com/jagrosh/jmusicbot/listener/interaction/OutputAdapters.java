@@ -32,6 +32,17 @@ public final class OutputAdapters {
     }
 
     /**
+     * Edits the message a component belongs to with plain text. A Components V2 widget cannot
+     * take message content, so its text goes into a text display instead.
+     */
+    private static net.dv8tion.jda.api.requests.restaction.interactions.MessageEditCallbackAction editText(
+            net.dv8tion.jda.api.interactions.components.ComponentInteraction event, String content) {
+        net.dv8tion.jda.api.entities.Message message = event.getMessage();
+        return message != null && message.isUsingComponentsV2()
+                ? event.editMessage(com.jagrosh.jmusicbot.utils.ComponentsV2.text(content))
+                : event.editMessage(content);
+    }
+    /**
      * Adapter for playback control buttons: replies and edits now-playing message.
      */
     public static MusicService.OutputAdapter forPlaybackButton(net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent event) {
@@ -53,12 +64,12 @@ public final class OutputAdapters {
 
             @Override
             public void editMessage(String content) {
-                event.editMessage(content).queue();
+                editText(event, content).queue();
             }
 
             @Override
             public void editMessage(String content, Consumer<net.dv8tion.jda.api.entities.Message> onSuccess) {
-                event.editMessage(content).queue(hook -> hook.retrieveOriginal().queue(onSuccess));
+                editText(event, content).queue(hook -> hook.retrieveOriginal().queue(onSuccess));
             }
 
             @Override
@@ -117,12 +128,12 @@ public final class OutputAdapters {
 
             @Override
             public void editMessage(String content) {
-                event.editMessage(content).queue();
+                editText(event, content).queue();
             }
 
             @Override
             public void editMessage(String content, Consumer<net.dv8tion.jda.api.entities.Message> onSuccess) {
-                event.editMessage(content).queue(hook -> hook.retrieveOriginal().queue(onSuccess));
+                editText(event, content).queue(hook -> hook.retrieveOriginal().queue(onSuccess));
             }
 
             @Override
@@ -350,10 +361,6 @@ public final class OutputAdapters {
     }
 
     private static MessageEditData asEditData(MessageCreateData source) {
-        return new MessageEditBuilder()
-                .setContent(source.getContent() == null ? "" : source.getContent())
-                .setEmbeds(source.getEmbeds())
-                .setComponents(source.getComponents())
-                .build();
+        return com.jagrosh.jmusicbot.utils.ComponentsV2.editOf(source);
     }
 }

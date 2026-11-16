@@ -111,10 +111,6 @@ public class SearchSlashCmdTest
         String query = "test song";
         when(fixture.getEvent().getOption("query")).thenReturn(queryOption);
         when(queryOption.getAsString()).thenReturn(query);
-        when(fixture.getHook().editOriginalEmbeds(any(java.util.Collection.class))).thenReturn(fixture.getEditAction());
-        when(fixture.getEditAction().setContent(anyString())).thenReturn(fixture.getEditAction());
-        when(fixture.getEditAction().setComponents(any(net.dv8tion.jda.api.components.MessageTopLevelComponent.class)))
-                .thenReturn(fixture.getEditAction());
         fixture.withEditQueueCallback();
 
         ArgumentCaptor<SearchService.SearchCallback> callbackCaptor =
@@ -144,9 +140,13 @@ public class SearchSlashCmdTest
 
         callbackCaptor.getValue().onSearchResults(toResults(playlist), new String[]{});
 
-        verify(fixture.getHook()).editOriginalEmbeds(any(java.util.Collection.class));
-        verify(fixture.getEditAction()).setContent(anyString());
-        verify(fixture.getEditAction()).setComponents(any(net.dv8tion.jda.api.components.MessageTopLevelComponent.class));
+        ArgumentCaptor<net.dv8tion.jda.api.utils.messages.MessageEditData> editCaptor =
+                ArgumentCaptor.forClass(net.dv8tion.jda.api.utils.messages.MessageEditData.class);
+        verify(fixture.getHook()).editOriginal(editCaptor.capture());
+        String text = com.jagrosh.jmusicbot.testutil.V2Messages.text(editCaptor.getValue().getComponents());
+        org.junit.jupiter.api.Assertions.assertTrue(text.contains("Search results for"));
+        org.junit.jupiter.api.Assertions.assertTrue(text.contains("Song 1") && text.contains("Song 2"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, com.jagrosh.jmusicbot.testutil.V2Messages.rows(editCaptor.getValue().getComponents()).size());
     }
 
     @Test
@@ -249,10 +249,6 @@ public class SearchSlashCmdTest
         String query = "test song";
         when(fixture.getEvent().getOption("query")).thenReturn(queryOption);
         when(queryOption.getAsString()).thenReturn(query);
-        when(fixture.getHook().editOriginalEmbeds(any(java.util.Collection.class))).thenReturn(fixture.getEditAction());
-        when(fixture.getEditAction().setContent(anyString())).thenReturn(fixture.getEditAction());
-        when(fixture.getEditAction().setComponents(any(net.dv8tion.jda.api.components.MessageTopLevelComponent.class)))
-                .thenReturn(fixture.getEditAction());
         fixture.withEditQueueCallback();
         when(fixture.getMessage().getIdLong()).thenReturn(67890L);
 

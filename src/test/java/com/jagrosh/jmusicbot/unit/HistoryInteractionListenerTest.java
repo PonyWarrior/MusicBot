@@ -75,12 +75,11 @@ public class HistoryInteractionListenerTest {
         MusicService.HistoryInfo info = new MusicService.HistoryInfo(new String[0], 0L, 0, true);
         when(fixture.getMusicService().getHistoryInfo(fixture.getGuild(), fixture.getJda())).thenReturn(info);
         MessageEditCallbackAction editAction = mock(MessageEditCallbackAction.class);
-        when(fixture.getButtonInteractionEvent().editMessage(any(String.class))).thenReturn(editAction);
-        when(editAction.setEmbeds()).thenReturn(editAction);
-        when(editAction.setComponents()).thenReturn(editAction);
+        when(fixture.getButtonInteractionEvent().editMessage(any(net.dv8tion.jda.api.utils.messages.MessageEditData.class))).thenReturn(editAction);
 
         listener.onButtonInteraction(fixture.getButtonInteractionEvent());
 
-        verify(fixture.getButtonInteractionEvent()).editMessage(argThat((String s) -> s.contains("disabled by config")));
+        verify(fixture.getButtonInteractionEvent()).editMessage(argThat((net.dv8tion.jda.api.utils.messages.MessageEditData d) ->
+                com.jagrosh.jmusicbot.testutil.V2Messages.text(d.getComponents()).contains("disabled by config")));
     }
 }

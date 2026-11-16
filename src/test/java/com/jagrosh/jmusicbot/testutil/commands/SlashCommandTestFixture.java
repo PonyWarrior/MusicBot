@@ -220,6 +220,7 @@ public class SlashCommandTestFixture
         // Reply action chain
         when(event.reply(anyString())).thenReturn(replyAction);
         when(event.replyEmbeds(any(net.dv8tion.jda.api.entities.MessageEmbed.class))).thenReturn(replyAction);
+        when(event.reply(any(net.dv8tion.jda.api.utils.messages.MessageCreateData.class))).thenReturn(replyAction);
         when(replyAction.setEphemeral(anyBoolean())).thenReturn(replyAction);
         when(replyAction.setComponents(anyList())).thenReturn(replyAction);
         when(replyAction.addEmbeds(any(net.dv8tion.jda.api.entities.MessageEmbed.class))).thenReturn(replyAction);
@@ -227,6 +228,7 @@ public class SlashCommandTestFixture
 
         // Hook and edit action chain
         when(hook.editOriginal(anyString())).thenReturn(editAction);
+        when(hook.editOriginal(any(net.dv8tion.jda.api.utils.messages.MessageEditData.class))).thenReturn(editAction);
         when(hook.retrieveOriginal()).thenReturn(retrieveAction);
         doNothing().when(editAction).queue();
 

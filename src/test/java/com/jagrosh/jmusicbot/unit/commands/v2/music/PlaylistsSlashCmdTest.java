@@ -80,16 +80,14 @@ class PlaylistsSlashCmdTest
 
         command.doCommand(fixture.getEvent());
 
-        ArgumentCaptor<MessageEmbed> embedCaptor = ArgumentCaptor.forClass(MessageEmbed.class);
-        verify(fixture.getEvent()).replyEmbeds(embedCaptor.capture());
-        assertEquals("Playlists", embedCaptor.getValue().getTitle());
-        assertTrue(embedCaptor.getValue().getDescription().contains("favorite"));
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<ActionRow>> componentsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(fixture.getReplyAction()).setComponents(componentsCaptor.capture());
-        assertFalse(componentsCaptor.getValue().isEmpty());
-        assertEquals(2, componentsCaptor.getValue().size());
+        ArgumentCaptor<net.dv8tion.jda.api.utils.messages.MessageCreateData> replyCaptor =
+                ArgumentCaptor.forClass(net.dv8tion.jda.api.utils.messages.MessageCreateData.class);
+        verify(fixture.getEvent()).reply(replyCaptor.capture());
+        assertTrue(replyCaptor.getValue().isUsingComponentsV2());
+        String text = com.jagrosh.jmusicbot.testutil.V2Messages.text(replyCaptor.getValue().getComponents());
+        assertTrue(text.contains("Playlists"));
+        assertTrue(text.contains("favorite"));
+        assertEquals(2, com.jagrosh.jmusicbot.testutil.V2Messages.rows(replyCaptor.getValue().getComponents()).size());
     }
 
     @Test

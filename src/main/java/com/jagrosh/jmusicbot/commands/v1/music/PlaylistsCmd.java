@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.commands.v1.music;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jdautilities.command.CommandEvent;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.commands.v1.MusicCommand;
@@ -61,10 +62,7 @@ public class PlaylistsCmd extends MusicCommand
 
             var embed = PlaylistsSlashCmd.buildPlaylistsEmbed(list, page, totalPages, 0, color);
             var components = PlaylistsSlashCmd.buildPlaylistsComponents(page, totalPages, playlistsOnPage, 0, userId);
-            MessageCreateData message = new MessageCreateBuilder()
-                    .addEmbeds(embed)
-                    .setComponents(components)
-                    .build();
+            MessageCreateData message = ComponentsV2.create(null, embed, components);
             event.reply(message);
         }
     }

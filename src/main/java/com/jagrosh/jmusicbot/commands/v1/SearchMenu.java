@@ -1,5 +1,6 @@
 package com.jagrosh.jmusicbot.commands.v1;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jdautilities.commons.waiter.EventWaiter;
 import com.jagrosh.jdautilities.menu.OrderedMenu;
 import com.jagrosh.jmusicbot.service.SearchResult;
@@ -95,7 +96,7 @@ public final class SearchMenu
             return;
         }
 
-        channel.sendMessageEmbeds(embeds).queue(message ->
+        channel.sendMessage(ComponentsV2.createCards(null, embeds, java.util.List.of())).queue(message ->
         {
             // The reactions are a convenience; a missing permission must not break the menu,
             // because the number can also be typed.

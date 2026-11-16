@@ -19,6 +19,7 @@ import com.jagrosh.jmusicbot.commands.v2.music.QueueSlashCmd;
 import com.jagrosh.jmusicbot.service.MusicService;
 import com.jagrosh.jmusicbot.settings.QueueType;
 import com.jagrosh.jmusicbot.settings.RepeatMode;
+import com.jagrosh.jmusicbot.testutil.V2Messages;
 import com.jagrosh.jmusicbot.testutil.commands.SlashCommandTestFixture;
 import net.dv8tion.jda.api.components.actionrow.ActionRow;
 import net.dv8tion.jda.api.components.buttons.Button;
@@ -142,19 +143,17 @@ public class QueueSlashCmdTest
         command.doCommand(fixture.getEvent());
 
         // Then - verify replyEmbeds was called with embed
-        ArgumentCaptor<MessageEmbed> embedCaptor = ArgumentCaptor.forClass(MessageEmbed.class);
-        verify(fixture.getEvent()).replyEmbeds(embedCaptor.capture());
+        ArgumentCaptor<MessageCreateData> replyCaptor = ArgumentCaptor.forClass(MessageCreateData.class);
+        verify(fixture.getEvent()).reply(replyCaptor.capture());
+        assertTrue(replyCaptor.getValue().isUsingComponentsV2());
+        String text = V2Messages.text(replyCaptor.getValue().getComponents());
 
-        MessageEmbed capturedEmbed = embedCaptor.getValue();
-        assertEquals("Current Queue", capturedEmbed.getTitle());
-        assertTrue(capturedEmbed.getDescription().contains("Now Playing"));
-        assertTrue(capturedEmbed.getDescription().contains("Track 1"));
+        assertTrue(text.contains("Current Queue"));
+        assertTrue(text.contains("Now Playing"));
+        assertTrue(text.contains("Track 1"));
 
         // Verify components were set (sparse selection rows + pagination/actions)
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<ActionRow>> componentsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(fixture.getReplyAction()).setComponents(componentsCaptor.capture());
-        List<ActionRow> components = componentsCaptor.getValue();
+        List<ActionRow> components = V2Messages.rows(replyCaptor.getValue().getComponents());
         assertEquals(2, components.size()); // 3 tracks => one select row + pagination row
     }
 
@@ -184,11 +183,11 @@ public class QueueSlashCmdTest
         command.doCommand(fixture.getEvent());
 
         // Then - verify embed footer contains page 2
-        ArgumentCaptor<MessageEmbed> embedCaptor = ArgumentCaptor.forClass(MessageEmbed.class);
-        verify(fixture.getEvent()).replyEmbeds(embedCaptor.capture());
-        MessageEmbed capturedEmbed = embedCaptor.getValue();
-        assertNotNull(capturedEmbed.getFooter());
-        assertTrue(capturedEmbed.getFooter().getText().contains("Page 2"));
+        ArgumentCaptor<MessageCreateData> replyCaptor = ArgumentCaptor.forClass(MessageCreateData.class);
+        verify(fixture.getEvent()).reply(replyCaptor.capture());
+        assertTrue(replyCaptor.getValue().isUsingComponentsV2());
+        String text = V2Messages.text(replyCaptor.getValue().getComponents());
+        assertTrue(text.contains("Page 2"));
     }
 
     @Test
@@ -215,11 +214,11 @@ public class QueueSlashCmdTest
         command.doCommand(fixture.getEvent());
 
         // Then - should clamp to last page (1)
-        ArgumentCaptor<MessageEmbed> embedCaptor = ArgumentCaptor.forClass(MessageEmbed.class);
-        verify(fixture.getEvent()).replyEmbeds(embedCaptor.capture());
-        MessageEmbed capturedEmbed = embedCaptor.getValue();
-        assertNotNull(capturedEmbed.getFooter());
-        assertTrue(capturedEmbed.getFooter().getText().contains("Page 1"));
+        ArgumentCaptor<MessageCreateData> replyCaptor = ArgumentCaptor.forClass(MessageCreateData.class);
+        verify(fixture.getEvent()).reply(replyCaptor.capture());
+        assertTrue(replyCaptor.getValue().isUsingComponentsV2());
+        String text = V2Messages.text(replyCaptor.getValue().getComponents());
+        assertTrue(text.contains("Page 1"));
     }
 
     @Test
@@ -249,17 +248,17 @@ public class QueueSlashCmdTest
         command.doCommand(fixture.getEvent());
 
         // Then
-        ArgumentCaptor<MessageEmbed> embedCaptor = ArgumentCaptor.forClass(MessageEmbed.class);
-        verify(fixture.getEvent()).replyEmbeds(embedCaptor.capture());
-        MessageEmbed capturedEmbed = embedCaptor.getValue();
+        ArgumentCaptor<MessageCreateData> replyCaptor = ArgumentCaptor.forClass(MessageCreateData.class);
+        verify(fixture.getEvent()).reply(replyCaptor.capture());
+        assertTrue(replyCaptor.getValue().isUsingComponentsV2());
+        String text = V2Messages.text(replyCaptor.getValue().getComponents());
 
         // Verify footer shows page 1 of 3
-        assertNotNull(capturedEmbed.getFooter());
-        assertTrue(capturedEmbed.getFooter().getText().contains("Page 1 of 3"));
+        assertTrue(text.contains("Page 1 of 3"));
 
         // Verify description contains first page tracks
-        assertTrue(capturedEmbed.getDescription().contains("Track 1"));
-        assertTrue(capturedEmbed.getDescription().contains("Track 10"));
+        assertTrue(text.contains("Track 1"));
+        assertTrue(text.contains("Track 10"));
     }
 
     @Test

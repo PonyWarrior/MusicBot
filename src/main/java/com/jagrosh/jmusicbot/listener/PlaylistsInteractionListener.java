@@ -15,6 +15,7 @@
  */
 package com.jagrosh.jmusicbot.listener;
 
+import com.jagrosh.jmusicbot.utils.ComponentsV2;
 import com.jagrosh.jmusicbot.Bot;
 import com.jagrosh.jmusicbot.commands.v2.music.PlaylistsSlashCmd;
 import com.jagrosh.jmusicbot.listener.interaction.ComponentIdParsers;
@@ -446,7 +447,7 @@ public class PlaylistsInteractionListener extends ListenerAdapter
         List<String> playlists = playlistNamesInfo.names;
         if (playlists.isEmpty())
         {
-            event.editMessage("There are no playlists in the Playlists folder!").setEmbeds().setComponents().queue();
+            event.editMessage(ComponentsV2.text("There are no playlists in the Playlists folder!")).queue();
             return;
         }
 
@@ -572,7 +573,7 @@ public class PlaylistsInteractionListener extends ListenerAdapter
         MessageEmbed embed = PlaylistsSlashCmd.buildPlaylistsEmbed(playlists, page, totalPages, selectedIndex,
                 event.getMember().getColor());
         List<ActionRow> components = PlaylistsSlashCmd.buildPlaylistsComponents(page, totalPages, playlistsOnPage, selectedIndex, userId);
-        event.editMessageEmbeds(embed).setComponents(components).queue();
+        event.editMessage(ComponentsV2.edit(null, embed, components)).queue();
     }
 
     private void renderPlaylistListView(ButtonInteractionEvent event, int listPage, int listSelectedIndex, long userId)
@@ -586,7 +587,7 @@ public class PlaylistsInteractionListener extends ListenerAdapter
         List<String> playlists = playlistNamesInfo.names;
         if (playlists.isEmpty())
         {
-            event.editMessage("There are no playlists in the Playlists folder!").setEmbeds().setComponents().queue();
+            event.editMessage(ComponentsV2.text("There are no playlists in the Playlists folder!")).queue();
             return;
         }
         int totalPages = PlaylistsSlashCmd.getTotalPages(playlists.size());
@@ -608,8 +609,8 @@ public class PlaylistsInteractionListener extends ListenerAdapter
                                            MusicService.PlaylistDraftContext draftContext)
     {
         renderPlaylistDetailsView(result ->
-                        event.editMessageEmbeds(result.embed()).setComponents(result.components()).queue(),
-                message -> event.editMessage(message).setEmbeds().setComponents().queue(),
+                        event.editMessage(ComponentsV2.edit(null, result.embed(), result.components())).queue(),
+                message -> event.editMessage(ComponentsV2.text(message)).queue(),
                 event.getGuild(), event.getMember(), playlistIndex, listPage, detailsPage, selectedTrack, userId,
                 playlistName, draftContext);
     }
@@ -619,8 +620,8 @@ public class PlaylistsInteractionListener extends ListenerAdapter
                                            MusicService.PlaylistDraftContext draftContext)
     {
         renderPlaylistDetailsView(result ->
-                        event.editMessageEmbeds(result.embed()).setComponents(result.components()).queue(),
-                message -> event.editMessage(message).setEmbeds().setComponents().queue(),
+                        event.editMessage(ComponentsV2.edit(null, result.embed(), result.components())).queue(),
+                message -> event.editMessage(ComponentsV2.text(message)).queue(),
                 event.getGuild(), event.getMember(), playlistIndex, listPage, detailsPage, selectedTrack, userId,
                 playlistName, draftContext);
     }
@@ -632,8 +633,8 @@ public class PlaylistsInteractionListener extends ListenerAdapter
                                            MusicService.PlaylistDraftContext draftContext)
     {
         renderPlaylistDetailsView(result ->
-                        hook.editOriginalEmbeds(result.embed()).setComponents(result.components()).queue(),
-                message -> hook.editOriginal(message).setEmbeds(java.util.Collections.emptyList()).setComponents(java.util.Collections.emptyList()).queue(),
+                        hook.editOriginal(ComponentsV2.edit(null, result.embed(), result.components())).queue(),
+                message -> hook.editOriginal(ComponentsV2.text(message)).queue(),
                 event.getGuild(), event.getMember(), playlistIndex, listPage, detailsPage, selectedTrack, userId,
                 playlistName, draftContext);
     }
@@ -724,12 +725,7 @@ public class PlaylistsInteractionListener extends ListenerAdapter
                     }
                     String cancelMoveId = "playlistdetails_" + playlistIndex + "_" + listPage + "_cancelmove_"
                             + safePage + "_" + safeSelected + "_" + userId;
-                    event.editMessageEmbeds(embed)
-                            .setComponents(
-                                    ActionRow.of(menuBuilder.build()),
-                                    ActionRow.of(net.dv8tion.jda.api.components.buttons.Button.secondary(cancelMoveId, "Back"))
-                            )
-                            .queue();
+                    event.editMessage(ComponentsV2.edit(null, embed, List.of(ActionRow.of(menuBuilder.build()), ActionRow.of(net.dv8tion.jda.api.components.buttons.Button.secondary(cancelMoveId, "Back"))))).queue();
                 });
     }
 

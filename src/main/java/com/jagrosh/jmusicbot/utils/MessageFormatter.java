@@ -20,9 +20,20 @@ public class MessageFormatter {
     private static final int MIN_VOLUME = 0;
     private static final int MAX_VOLUME = 150;
 
+    /**
+     * The now-playing widget as a Components V2 card.
+     */
     public static MessageCreateData buildNowPlayingMessage(Bot bot, NowPlayingInfo info) {
+        return ComponentsV2.toV2(buildNowPlayingLayout(bot, info));
+    }
+
+    /**
+     * The now-playing widget described as content, an embed and button rows. The live widget is
+     * {@link #buildNowPlayingMessage}, which renders this layout as a Components V2 card.
+     */
+    public static MessageCreateData buildNowPlayingLayout(Bot bot, NowPlayingInfo info) {
         if (info.track == null)
-            return buildNoMusicPlayingMessage(bot, info);
+            return buildNoMusicPlayingLayout(bot, info);
 
         Settings settings = bot.getSettingsManager().getSettings(info.guild);
         boolean minimalMessage = settings.useMinimalNowPlayingMessage(bot.getConfig());
@@ -106,7 +117,17 @@ public class MessageFormatter {
         return mb.build();
     }
 
+    /**
+     * The idle widget as a Components V2 card.
+     */
     public static MessageCreateData buildNoMusicPlayingMessage(Bot bot, NowPlayingInfo info) {
+        return ComponentsV2.toV2(buildNoMusicPlayingLayout(bot, info));
+    }
+
+    /**
+     * The idle widget described as content and an embed; see {@link #buildNowPlayingLayout}.
+     */
+    public static MessageCreateData buildNoMusicPlayingLayout(Bot bot, NowPlayingInfo info) {
         Settings settings = bot.getSettingsManager().getSettings(info.guild);
         boolean minimalMessage = settings.useMinimalNowPlayingMessage(bot.getConfig());
 

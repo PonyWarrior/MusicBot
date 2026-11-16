@@ -164,10 +164,6 @@ public final class SlashOutputAdapters
 
     private static MessageEditData asEditData(MessageCreateData source)
     {
-        return new MessageEditBuilder()
-                .setContent(source.getContent() == null ? "" : source.getContent())
-                .setEmbeds(source.getEmbeds())
-                .setComponents(source.getComponents())
-                .build();
+        return com.jagrosh.jmusicbot.utils.ComponentsV2.editOf(source);
     }
 }
