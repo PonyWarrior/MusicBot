@@ -671,12 +671,7 @@ public class UpdateManager
         Files.move(jar, target, StandardCopyOption.REPLACE_EXISTING);
 
         Path script = dir.resolve("apply-update.ps1");
-        try (InputStream in = UpdateManager.class.getResourceAsStream("/update/apply-update.ps1"))
-        {
-            if (in == null)
-                throw new IOException("apply-update.ps1 is missing from the jar");
-            Files.copy(in, script, StandardCopyOption.REPLACE_EXISTING);
-        }
+        writeUpdateScript(target, script);
         Files.writeString(dir.resolve("pending"), version);
 
         ProcessBuilder builder = new ProcessBuilder("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
@@ -695,6 +690,45 @@ public class UpdateManager
         Thread shutdown = new Thread(bot::shutdown, "update-shutdown");
         shutdown.start();
         return "installing " + version + ", the bot restarts now";
+    }
+
+    private static final String UPDATE_SCRIPT = "update/apply-update.ps1";
+
+    /**
+     * Writes the script that swaps the jar. It is taken from the new (checksum-verified) jar, so a
+     * fix to the script applies to the very update that ships it; the running jar's copy is only
+     * the fallback for a jar without one.
+     *
+     * @param newJar the downloaded jar
+     * @param script where to write the script
+     * @return true when the script came from the new jar
+     */
+    public static boolean writeUpdateScript(Path newJar, Path script) throws IOException
+    {
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(newJar.toFile()))
+        {
+            java.util.zip.ZipEntry entry = zip.getEntry(UPDATE_SCRIPT);
+            if (entry != null)
+            {
+                try (InputStream in = zip.getInputStream(entry))
+                {
+                    Files.copy(in, script, StandardCopyOption.REPLACE_EXISTING);
+                }
+                return true;
+            }
+        }
+        catch (IOException e)
+        {
+            LOG.warn("Could not read the update script from {}, using the current one: {}", newJar, e.getMessage());
+        }
+
+        try (InputStream in = UpdateManager.class.getResourceAsStream("/" + UPDATE_SCRIPT))
+        {
+            if (in == null)
+                throw new IOException("apply-update.ps1 is missing from the jar");
+            Files.copy(in, script, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return false;
     }
 
     // ========== Download and swap helpers ==========
