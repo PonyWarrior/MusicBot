@@ -124,6 +124,15 @@ public class YtDlpDownloader
         }
     }
 
+    /**
+     * Reads yt-dlp's output. Invalid UTF-8 is replaced instead of failing, so an unexpected
+     * encoding can never turn a finished download into "Input length = N".
+     */
+    public static String readOutput(Path outputFile) throws IOException
+    {
+        return new String(Files.readAllBytes(outputFile), StandardCharsets.UTF_8);
+    }
+
     /** Starts a process and registers it, unless an update is replacing the binaries. */
     private static Process startTracked(ProcessBuilder builder) throws IOException
     {
@@ -169,7 +178,7 @@ public class YtDlpDownloader
                     process.destroyForcibly();
                     return false;
                 }
-                String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+                String output = readOutput(outputFile);
                 if (process.exitValue() != 0)
                 {
                     LOG.error("yt-dlp could not be started: {}", output.strip());
@@ -218,6 +227,11 @@ public class YtDlpDownloader
         args.add("--no-playlist");
         args.add("--no-warnings");
         args.add("--ignore-config");
+        // With its output redirected to a file, yt-dlp on Windows writes in the ANSI code page
+        // and mangles or drops characters such as "è". The printed file path then is not valid
+        // UTF-8 and does not match the file on disk, so force UTF-8 output.
+        args.add("--encoding");
+        args.add("utf-8");
         args.add("--no-progress");
         args.add("-f");
         args.add("bestaudio/best");
@@ -263,7 +277,7 @@ public class YtDlpDownloader
                 throw new IOException("The download timed out after " + timeoutMinutes + " minutes");
             }
 
-            String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+            String output = readOutput(outputFile);
             if (process.exitValue() != 0)
             {
                 throw new IOException("yt-dlp failed: " + lastLines(output));
