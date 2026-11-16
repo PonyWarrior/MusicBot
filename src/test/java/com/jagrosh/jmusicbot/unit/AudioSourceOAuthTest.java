@@ -232,21 +232,9 @@ class AudioSourceOAuthTest {
             // With OAuth enabled
             Object[] oauthClients = (Object[]) buildClients.invoke(null, true);
             assertNotNull(oauthClients, "Should return clients for OAuth mode");
-            assertEquals(6, oauthClients.length, "OAuth mode should use 6 clients");
-            
-            // Verify client types
-            assertEquals("AndroidVrWithThumbnail", oauthClients[0].getClass().getSimpleName(),
-                "First OAuth client should be <AndroidVrWithThumbnail>");
-            assertEquals("MWebWithThumbnail", oauthClients[1].getClass().getSimpleName(),
-                "Second OAuth client should be <MWebWithThumbnail>");
-            assertEquals("WebWithThumbnail", oauthClients[2].getClass().getSimpleName(),
-                "Third OAuth client should be <WebWithThumbnail>");
-            assertEquals("Tv", oauthClients[3].getClass().getSimpleName(),
-                "Fourth OAuth client should be Tv");
-            assertEquals("LegacyFormatClient", oauthClients[4].getClass().getSimpleName(),
-                "Fifth OAuth client should be <LegacyFormatClient>");
-            assertEquals("TvHtml5SimplyWithThumbnail", oauthClients[5].getClass().getSimpleName(),
-                "Sixth OAuth client should be TvHtml5SimplyWithThumbnail");
+            assertEquals(java.util.List.of("AndroidVrClient", "MWebWithThumbnail", "WebWithThumbnail", "Tv",
+                    "LegacyFormatClient", "VisionOsClient", "TvHtml5SimplyWithThumbnail"),
+                names(oauthClients), "OAuth client order");
             // Verify first 3 clients have playback disabled (metadataOnly)
             for (int i = 0; i < 3; i++) {
                 Client client = (Client) oauthClients[i];
@@ -264,19 +252,12 @@ class AudioSourceOAuthTest {
             // Without OAuth
             Object[] nonOauthClients = (Object[]) buildClients.invoke(null, false);
             assertNotNull(nonOauthClients, "Should return clients for non-OAuth mode");
-            assertEquals(5, nonOauthClients.length, "Non-OAuth mode should use 5 clients");
-            
-            // Verify client types
-            assertEquals("LegacyFormatClient", nonOauthClients[0].getClass().getSimpleName(),
-                "First non-OAuth client should be <LegacyFormatClient>");
-            assertEquals("AndroidVrWithThumbnail", nonOauthClients[1].getClass().getSimpleName(),
-                "Second non-OAuth client should be <AndroidVrWithThumbnail>");
-            assertEquals("MWebWithThumbnail", nonOauthClients[2].getClass().getSimpleName(),
-                "Third non-OAuth client should be <MWebWithThumbnail>");
-            assertEquals("WebWithThumbnail", nonOauthClients[3].getClass().getSimpleName(),
-                "Fourth non-OAuth client should be <WebWithThumbnail>");
-            assertEquals("TvHtml5SimplyWithThumbnail", nonOauthClients[4].getClass().getSimpleName(),
-                "Fifth non-OAuth client should be <TvHtml5SimplyWithThumbnail>");
+            assertEquals(java.util.List.of("LegacyFormatClient", "VisionOsClient", "AndroidVrClient",
+                    "MWebWithThumbnail", "WebWithThumbnail", "TvHtml5SimplyWithThumbnail"),
+                names(nonOauthClients), "Non-OAuth client order");
+            // ANDROID_VR only plays about a minute without a PO token, so it stays metadata-only.
+            assertFalse(((Client) nonOauthClients[2]).getOptions().getPlayback(),
+                "AndroidVrClient should have playback disabled");
         }
 
         @Test
@@ -294,7 +275,11 @@ class AudioSourceOAuthTest {
             });
         }
         
-        private Method getBuildYoutubeClientsMethod() throws NoSuchMethodException {
+        private static java.util.List<String> names(Object[] clients) {
+        return java.util.Arrays.stream(clients).map(c -> c.getClass().getSimpleName()).toList();
+    }
+
+    private Method getBuildYoutubeClientsMethod() throws NoSuchMethodException {
             Class<?> audioSourceClass = com.jagrosh.jmusicbot.audio.AudioSource.class;
             Method method = audioSourceClass.getDeclaredMethod("buildYoutubeClients", boolean.class);
             method.setAccessible(true);

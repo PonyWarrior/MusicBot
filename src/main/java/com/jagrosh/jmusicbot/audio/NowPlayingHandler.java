@@ -24,6 +24,7 @@ import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.entities.channel.middleman.GuildMessageChannel;
 import net.dv8tion.jda.api.exceptions.ErrorResponseException;
 import net.dv8tion.jda.api.requests.ErrorResponse;
 import net.dv8tion.jda.api.utils.messages.MessageCreateData;
@@ -234,7 +235,7 @@ public class NowPlayingHandler
             return;
         }
 
-        TextChannel tc = guild.getTextChannelById(loc.channelId());
+        GuildMessageChannel tc = resolveMessageChannel(guild, loc.channelId());
         if (tc == null)
         {
             synchronized (state)
@@ -277,13 +278,13 @@ public class NowPlayingHandler
     private void sendPlayingMessage(long guildId, Guild guild, AudioTrack currentTrack, NPLocation previousLocation,
                                     MessageCreateData msg, long reconcileVersion)
     {
-        TextChannel tc;
+        GuildMessageChannel tc;
         if(previousLocation == null)
         {
             if (currentTrack.getUserData(RequestMetadata.class) != null)
             {
                 long channelId = currentTrack.getUserData(RequestMetadata.class).channelId;
-                tc = guild.getTextChannelById(channelId);
+                tc = resolveMessageChannel(guild, channelId);
             }
             else
             {
@@ -292,7 +293,7 @@ public class NowPlayingHandler
         }
         else
         {
-            tc = guild.getTextChannelById(previousLocation.channelId());
+            tc = resolveMessageChannel(guild, previousLocation.channelId());
         }
 
         if (tc == null)
@@ -335,6 +336,18 @@ public class NowPlayingHandler
                     finishReconcile(guildId, reconcileVersion);
                 }
         );
+    }
+
+    /**
+     * Finds a channel the now-playing card can be posted in. A request can come from a voice
+     * channel's built-in text chat, which is not a {@link TextChannel}.
+     */
+    private GuildMessageChannel resolveMessageChannel(Guild guild, long channelId)
+    {
+        GuildMessageChannel channel = guild.getChannelById(GuildMessageChannel.class, channelId);
+        if (channel != null)
+            return channel;
+        return guild.getTextChannelById(channelId);
     }
 
     private TextChannel resolveFallbackChannel(Guild guild)

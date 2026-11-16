@@ -36,7 +36,6 @@ import com.sedmelluq.discord.lavaplayer.source.twitch.TwitchStreamAudioSourceMan
 import com.sedmelluq.discord.lavaplayer.source.vimeo.VimeoAudioSourceManager;
 import dev.lavalink.youtube.YoutubeAudioSourceManager;
 import dev.lavalink.youtube.YoutubeSourceOptions;
-import dev.lavalink.youtube.clients.AndroidVrWithThumbnail;
 import dev.lavalink.youtube.clients.ClientOptions;
 import dev.lavalink.youtube.clients.MWebWithThumbnail;
 import dev.lavalink.youtube.clients.Tv;
@@ -298,7 +297,8 @@ public enum AudioSource
      * 
      * <p>When OAuth is enabled, we use a combination of clients:
      * <ul>
-     *   <li><b>AndroidVrWithThumbnail</b> - Metadata loading (non-embedded, non-OAuth)</li>
+     *   <li><b>AndroidVrClient</b> - Metadata loading only (non-embedded, non-OAuth)</li>
+     *   <li><b>VisionOsClient</b> - Playback only; needs no PO token, n challenge or cipher</li>
      *   <li><b>MWebWithThumbnail</b> - Metadata loading (non-embedded, non-OAuth)</li>
      *   <li><b>Web</b> - Metadata loading (non-embedded, non-OAuth)</li>
      *   <li><b>Tv</b> - OAuth-compatible streaming-only client. Used as fallback for loading
@@ -311,26 +311,29 @@ public enum AudioSource
      */
     private static Client[] buildYoutubeClients(boolean useOauth)
     {
+        // ANDROID_VR only gets about a minute of audio without a PO token, so it is kept for
+        // metadata, search and playlists (AndroidVrClient also sends a client version YouTube
+        // still accepts). VisionOsClient is playback-only and needs no PO token or cipher.
+        ClientOptions metadataOnly = new ClientOptions();
+        metadataOnly.setPlayback(false);
+
         if (useOauth)
         {
-            // Clients configured for metadata loading only (no playback/streaming)
-            // This handles direct URLs without embedded player restrictions
-            ClientOptions metadataOnly = new ClientOptions();
-            metadataOnly.setPlayback(false);
-            
             return new Client[] {
-                new AndroidVrWithThumbnail(metadataOnly), // metadata loading (non-embedded, non-OAuth)
+                new AndroidVrClient(metadataOnly),        // metadata loading (non-embedded, non-OAuth)
                 new MWebWithThumbnail(metadataOnly),      // metadata loading (non-embedded, non-OAuth)
                 new WebWithThumbnail(metadataOnly),       // metadata loading (non-embedded, non-OAuth)
                 new Tv(),
                 new LegacyFormatClient(),                 // legacy itag 18, not throttled by YouTube
+                new VisionOsClient(),                     // playback fallback, no PO token needed
                 new TvHtml5SimplyWithThumbnail()
             };
         }
         // Clients are required even without OAuth to properly handle YouTube URLs
         return new Client[] {
             new LegacyFormatClient(),
-            new AndroidVrWithThumbnail(),
+            new VisionOsClient(),
+            new AndroidVrClient(metadataOnly),
             new MWebWithThumbnail(),
             new WebWithThumbnail(),
             new TvHtml5SimplyWithThumbnail()
