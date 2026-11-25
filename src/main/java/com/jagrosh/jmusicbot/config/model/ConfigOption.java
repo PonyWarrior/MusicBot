@@ -79,6 +79,7 @@ public enum ConfigOption {
     UPDATE_BETA("updates.beta", ConfigType.BOOLEAN, false, "Whether to include pre-release (beta) versions of the bot"),
     USE_EVAL("dangerous.eval", ConfigType.BOOLEAN, false, "Whether to enable eval command (DANGEROUS)"),
     USE_YOUTUBE_OAUTH("playback.youtube.useOAuth", ConfigType.BOOLEAN, false, "Whether to use YouTube OAuth2 for playback"),
+    BILIBILI_BROWSER_COOKIE("playback.bilibili.browserCookie", ConfigType.BOOLEAN, false, "Whether to send Bilibili's anonymous browser id cookie with API requests"),
     
     // Numeric options
     MAX_SECONDS("playback.maxTrackSeconds", ConfigType.LONG, false, "Maximum track length in seconds (0 = no limit)"),

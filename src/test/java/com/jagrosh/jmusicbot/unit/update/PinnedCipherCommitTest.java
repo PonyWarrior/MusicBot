@@ -42,4 +42,13 @@ class PinnedCipherCommitTest
         assertTrue(script.contains("$CipherCommit = \"" + UpdateManager.PINNED_CIPHER_COMMIT + "\""),
                 "setup-cipher.ps1 must pin the same yt-cipher commit as UpdateManager.PINNED_CIPHER_COMMIT");
     }
+
+    @Test
+    void ejsIsPinnedTheSameWay() throws Exception
+    {
+        assertTrue(UpdateManager.PINNED_EJS_COMMIT.matches("[0-9a-f]{40}"));
+        String script = Files.readString(Path.of("scripts", "windows", "setup-cipher.ps1"), StandardCharsets.UTF_8);
+        assertTrue(script.contains("$EjsCommit = \"" + UpdateManager.PINNED_EJS_COMMIT + "\""),
+                "setup-cipher.ps1 must pin the same ejs commit as UpdateManager.PINNED_EJS_COMMIT");
+    }
 }

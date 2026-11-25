@@ -258,6 +258,44 @@ public class YtDlpDownloader
 
         LOG.info("Downloading {} with yt-dlp into {}", url, outputTemplate.getParent());
 
+        Result result = run(args);
+        if (result.exitCode() != 0 && isHttp403(result.output()))
+        {
+            // YouTube sometimes answers a fresh format URL with 403 and accepts it a moment
+            // later, so one retry turns most of these into a successful download.
+            LOG.debug("yt-dlp output for the failed attempt:\n{}", result.output());
+            LOG.info("yt-dlp got HTTP 403 for {}; trying again in {} s", url, RETRY_DELAY_SECONDS);
+            Thread.sleep(TimeUnit.SECONDS.toMillis(RETRY_DELAY_SECONDS));
+            result = run(args);
+        }
+        String output = result.output();
+        if (result.exitCode() != 0)
+        {
+            throw new IOException("yt-dlp failed: " + errorSummary(output));
+        }
+
+        Path downloaded = parseDownloadedPath(output);
+        if (downloaded == null)
+        {
+            throw new IOException("yt-dlp did not report a downloaded file: " + errorSummary(output));
+        }
+
+        downloaded = ensureInsideLibrary(downloaded, libraryFolder);
+
+        LOG.info("Downloaded {}", downloaded.toAbsolutePath());
+        return downloaded;
+    }
+
+    /** How long to wait before retrying a download that YouTube answered with HTTP 403. */
+    static final long RETRY_DELAY_SECONDS = 3;
+
+    /** The exit code and the combined output of one yt-dlp run. */
+    private record Result(int exitCode, String output)
+    {
+    }
+
+    private Result run(List<String> args) throws IOException, InterruptedException
+    {
         ProcessBuilder builder = new ProcessBuilder(args);
         builder.directory(workingDirectory.toFile());
         builder.redirectErrorStream(true);
@@ -276,23 +314,7 @@ public class YtDlpDownloader
                 process.destroyForcibly();
                 throw new IOException("The download timed out after " + timeoutMinutes + " minutes");
             }
-
-            String output = readOutput(outputFile);
-            if (process.exitValue() != 0)
-            {
-                throw new IOException("yt-dlp failed: " + lastLines(output));
-            }
-
-            Path downloaded = parseDownloadedPath(output);
-            if (downloaded == null)
-            {
-                throw new IOException("yt-dlp did not report a downloaded file: " + lastLines(output));
-            }
-
-            downloaded = ensureInsideLibrary(downloaded, libraryFolder);
-
-            LOG.info("Downloaded {}", downloaded.toAbsolutePath());
-            return downloaded;
+            return new Result(process.exitValue(), readOutput(outputFile));
         }
         finally
         {
@@ -300,6 +322,34 @@ public class YtDlpDownloader
                 RUNNING.remove(process);
             Files.deleteIfExists(outputFile);
         }
+    }
+
+    /**
+     * @param output the output of a failed yt-dlp run
+     * @return true when the failure was YouTube refusing the media URL with HTTP 403
+     */
+    public static boolean isHttp403(String output)
+    {
+        return output != null && output.contains("HTTP Error 403");
+    }
+
+    /**
+     * The part of the yt-dlp output that explains a failure. When yt-dlp printed {@code ERROR:}
+     * lines those are what matters; otherwise the last few lines are used.
+     *
+     * @param output the output of yt-dlp
+     * @return a short summary for the error message
+     */
+    public static String errorSummary(String output)
+    {
+        StringBuilder errors = new StringBuilder();
+        for (String line : output.split("\\R"))
+        {
+            String trimmed = line.strip();
+            if (trimmed.startsWith("ERROR:"))
+                errors.append(trimmed).append(" | ");
+        }
+        return errors.length() > 0 ? errors.toString() : lastLines(output);
     }
 
     /**

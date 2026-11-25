@@ -31,7 +31,6 @@ import com.sedmelluq.discord.lavaplayer.source.beam.BeamAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.getyarn.GetyarnAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.http.HttpAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.nico.NicoAudioSourceManager;
-import com.sedmelluq.discord.lavaplayer.source.soundcloud.SoundCloudAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.twitch.TwitchStreamAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.vimeo.VimeoAudioSourceManager;
 import dev.lavalink.youtube.YoutubeAudioSourceManager;
@@ -46,6 +45,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.jagrosh.jmusicbot.BotConfig;
+import com.jagrosh.jmusicbot.audio.bilibili.BilibiliAudioSourceManager;
 import com.jagrosh.jmusicbot.utils.OtherUtil;
 
 /**
@@ -81,7 +81,7 @@ public enum AudioSource
         "soundcloud",
         "SoundCloud tracks",
         20,
-        (manager, config) -> manager.registerSourceManager(SoundCloudAudioSourceManager.createDefault())
+        (manager, config) -> manager.registerSourceManager(SoundCloudPlaybackSourceManager.create())
     ),
     BANDCAMP(
         "bandcamp",
@@ -118,6 +118,12 @@ public enum AudioSource
         "NicoNico videos",
         80,
         (manager, config) -> manager.registerSourceManager(new NicoAudioSourceManager())
+    ),
+    BILIBILI(
+        "bilibili",
+        "Bilibili (哔哩哔哩) videos and search",
+        25,
+        (manager, config) -> manager.registerSourceManager(new BilibiliAudioSourceManager(config.useBilibiliBrowserCookie()))
     ),
     
     // Catch-all sources (priority 100+) - registered last as fallbacks

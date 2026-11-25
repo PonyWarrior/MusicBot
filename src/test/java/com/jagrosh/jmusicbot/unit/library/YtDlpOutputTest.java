@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -37,5 +38,28 @@ class YtDlpOutputTest
         String output = YtDlpDownloader.readOutput(file);
         assertTrue(output.startsWith("Vos M"));
         assertTrue(output.endsWith("ratops"));
+    }
+
+    @Test
+    void detectsHttp403()
+    {
+        assertTrue(YtDlpDownloader.isHttp403(
+                "ERROR: unable to download video data: HTTP Error 403: Forbidden"));
+        assertFalse(YtDlpDownloader.isHttp403("ERROR: Video unavailable"));
+        assertFalse(YtDlpDownloader.isHttp403(null));
+    }
+
+    @Test
+    void summaryPrefersErrorLines()
+    {
+        String output = "[youtube] abc: Downloading webpage\nWARNING: something minor\n"
+                + "ERROR: Video unavailable\n[info] trailing line\n";
+        assertEquals("ERROR: Video unavailable | ", YtDlpDownloader.errorSummary(output));
+    }
+
+    @Test
+    void summaryFallsBackToLastLines()
+    {
+        assertEquals("one | two | three | ", YtDlpDownloader.errorSummary("zero\none\ntwo\nthree\n"));
     }
 }

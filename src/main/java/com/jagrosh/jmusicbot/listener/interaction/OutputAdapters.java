@@ -74,12 +74,12 @@ public final class OutputAdapters {
 
             @Override
             public void editNowPlaying(AudioHandler handler) {
-                event.editMessage(asEditData(handler.getNowPlaying(event.getJDA()))).queue();
+                editCard(event, asEditData(handler.getNowPlaying(event.getJDA())));
             }
 
             @Override
             public void editNoMusic(AudioHandler handler) {
-                event.editMessage(asEditData(handler.getNoMusicPlaying(event.getJDA()))).queue();
+                editCard(event, asEditData(handler.getNoMusicPlaying(event.getJDA())));
             }
 
             @Override
@@ -138,18 +138,32 @@ public final class OutputAdapters {
 
             @Override
             public void editNowPlaying(AudioHandler handler) {
-                event.editMessage(asEditData(handler.getNowPlaying(event.getJDA()))).queue();
+                editCard(event, asEditData(handler.getNowPlaying(event.getJDA())));
             }
 
             @Override
             public void editNoMusic(AudioHandler handler) {
-                event.editMessage(asEditData(handler.getNoMusicPlaying(event.getJDA()))).queue();
+                editCard(event, asEditData(handler.getNoMusicPlaying(event.getJDA())));
             }
 
             @Override
             public void onShowHelp() {
             }
         };
+    }
+
+    /**
+     * Edits the message the button belongs to. Once the interaction has been answered (the
+     * favorite button replies "Downloading..." first), {@code event.editMessage} is no longer
+     * allowed, and the hook's original is the reply, so the card is edited directly.
+     */
+    static void editCard(net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent event,
+                         MessageEditData data) {
+        if (event.isAcknowledged()) {
+            event.getMessage().editMessage(data).queue();
+        } else {
+            event.editMessage(data).queue();
+        }
     }
 
     /**

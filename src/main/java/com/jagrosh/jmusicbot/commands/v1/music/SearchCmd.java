@@ -118,7 +118,7 @@ public class SearchCmd extends MusicCommand
 
             SearchMenu.display(bot.getWaiter(), event.getChannel(), event.getAuthor(), results,
                     event.getSelfMember().getColor(), 1, TimeUnit.MINUTES,
-                    index -> select(results.get(index)),
+                    index -> onSelection(event, results.get(index).track()),
                     () -> { });
         }
 
@@ -141,28 +141,42 @@ public class SearchCmd extends MusicCommand
             m.editMessage(FormatUtil.filter(event.getClient().getError()+" "+message)).queue();
         }
 
-        /**
-         * Adds the chosen result to the queue.
-         *
-         * @param result the result that was chosen
-         */
-        private void select(SearchResult result)
+    }
+
+    /**
+     * Handles the result the user picked. Queues it as is; subclasses may check it first.
+     *
+     * @param event the command event
+     * @param track the picked track
+     */
+    protected void onSelection(CommandEvent event, AudioTrack track)
+    {
+        queueSelection(event, track);
+    }
+
+    /**
+     * Queues a picked result and confirms it in the channel.
+     *
+     * @param event the command event
+     * @param track the track to queue
+     */
+    protected final void queueSelection(CommandEvent event, AudioTrack track)
+    {
+        String trackTitle = FormatUtil.getTrackTitle(track);
+        if(trackTitle == null)
+            trackTitle = "";
+
+        if(bot.getConfig().isTooLong(track))
         {
-            AudioTrack track = result.track();
-            String trackTitle = result.title() == null ? "" : result.title();
-
-            if(bot.getConfig().isTooLong(track))
-            {
-                event.replyWarning("This track (**"+trackTitle+"**) is longer than the allowed maximum: `"
-                        + TimeUtil.formatTime(track.getDuration())+"` > `"+bot.getConfig().getMaxTime()+"`");
-                return;
-            }
-
-            AudioHandler handler = (AudioHandler)event.getGuild().getAudioManager().getSendingHandler();
-            int pos = handler.addTrack(new QueuedTrack(track, RequestMetadata.fromResultHandler(track, event)))+1;
-            event.replySuccess("Added **" + FormatUtil.filter(trackTitle)
-                    + "** (`" + TimeUtil.formatTime(track.getDuration()) + "`) " + (pos==0 ? "to begin playing"
-                        : " to the queue at position "+pos));
+            event.replyWarning("This track (**"+trackTitle+"**) is longer than the allowed maximum: `"
+                    + TimeUtil.formatTime(track.getDuration())+"` > `"+bot.getConfig().getMaxTime()+"`");
+            return;
         }
+
+        AudioHandler handler = (AudioHandler)event.getGuild().getAudioManager().getSendingHandler();
+        int pos = handler.addTrack(new QueuedTrack(track, RequestMetadata.fromResultHandler(track, event)))+1;
+        event.replySuccess("Added **" + FormatUtil.filter(trackTitle)
+                + "** (`" + TimeUtil.formatTime(track.getDuration()) + "`) " + (pos==0 ? "to begin playing"
+                    : " to the queue at position "+pos));
     }
 }

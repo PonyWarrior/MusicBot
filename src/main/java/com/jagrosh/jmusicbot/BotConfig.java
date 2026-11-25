@@ -65,7 +65,7 @@ public class BotConfig {
     private String token, prefix, altprefix, helpWord, playlistsFolder, logLevel,
             successEmoji, warningEmoji, errorEmoji, loadingEmoji, searchingEmoji,
             evalEngine, guiTheme, youtubeRemoteCipher, localCipherDirectory, localCipherCommand;
-    private boolean stayInChannel, songInGame, npImages, npMinimalMessage, npShowButtons, showNpProgressBar, updatealerts, useEval, dbots, useYouTubeOauth, guiEnabled, localCipherEnabled;
+    private boolean stayInChannel, songInGame, npImages, npMinimalMessage, npShowButtons, showNpProgressBar, updatealerts, useEval, dbots, useYouTubeOauth, useBilibiliBrowserCookie, guiEnabled, localCipherEnabled;
     private String guiMode;
     private long owner, maxSeconds, aloneTimeUntilStop;
     private long clearChannelAgeDays;
@@ -283,6 +283,7 @@ public class BotConfig {
         maxYTPlaylistPages = MAX_YT_PLAYLIST_PAGES.getInt(config);
         maxHistorySize = MAX_HISTORY_SIZE.getInt(config);
         useYouTubeOauth = USE_YOUTUBE_OAUTH.getBoolean(config);
+        useBilibiliBrowserCookie = BILIBILI_BROWSER_COOKIE.getBoolean(config);
         youtubeRemoteCipher = REMOTE_CIPHER.getString(config);
         localCipherEnabled = LOCAL_CIPHER_ENABLED.getBoolean(config);
         localCipherDirectory = LOCAL_CIPHER_DIRECTORY.getString(config);
@@ -571,6 +572,10 @@ public class BotConfig {
 
     public boolean useYouTubeOauth() {
         return useYouTubeOauth;
+    }
+
+    public boolean useBilibiliBrowserCookie() {
+        return useBilibiliBrowserCookie;
     }
 
     /**

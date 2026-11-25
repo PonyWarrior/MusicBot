@@ -15,8 +15,8 @@ param(
     [string]$Deno = "deno",
     # The reviewed yt-cipher commit. Keep it equal to UpdateManager.PINNED_CIPHER_COMMIT: the
     # in-app updater installs exactly this commit, never upstream HEAD.
-    [string]$CipherCommit = "1e1fd8e2f34ca90cf23545be72e46307bd3d3d2a",
-    [string]$EjsCommit = "cd4e87f52e87ab6d8b318fd3a817adda6fafa8dc"
+    [string]$CipherCommit = "d6b70bace398632cbc886934ff8273a7524fc0c4",
+    [string]$EjsCommit = "d48c6303a5a6455a42ef9e0b445149cadea51279"
 )
 
 $ErrorActionPreference = "Stop"

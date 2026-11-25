@@ -79,7 +79,16 @@ public class UpdateManager
      * release names one commit, and a new commit reaches users only through a bot update. Keep it
      * equal to {@code $CipherCommit} in {@code scripts/windows/setup-cipher.ps1}.
      */
-    public static final String PINNED_CIPHER_COMMIT = "1e1fd8e2f34ca90cf23545be72e46307bd3d3d2a";
+    public static final String PINNED_CIPHER_COMMIT = "d6b70bace398632cbc886934ff8273a7524fc0c4";
+
+    /**
+     * The yt-dlp/ejs commit installed with {@link #PINNED_CIPHER_COMMIT}. yt-cipher's
+     * {@code scripts/patch-ejs.ts} patches this exact source, so the two move together. Keep it equal
+     * to {@code $EjsCommit} in {@code scripts/windows/setup-cipher.ps1}.
+     */
+    public static final String PINNED_EJS_COMMIT = "d48c6303a5a6455a42ef9e0b445149cadea51279";
+
+    private static final String EJS_REPO = "yt-dlp/ejs";
 
     /** What the GUI and the owner command show for one component. */
     public record Status(String id, String name, boolean present, String installed, String latest,
@@ -453,7 +462,7 @@ public class UpdateManager
 
     private Path denoExe()
     {
-        return cipherDir().getParent().resolve("deno.exe");
+        return cipherDir().getParent().resolve(isWindows() ? "deno.exe" : "deno");
     }
 
     private static Path appDir()
@@ -476,7 +485,8 @@ public class UpdateManager
 
     private String install(UpdateComponent component)
     {
-        if (!isWindows())
+        // yt-cipher is plain source run by Deno, so it updates on any OS; the others are Windows builds.
+        if (!isWindows() && component != UpdateComponent.YTCIPHER)
             return "automatic updates are only available in the Windows package";
         recoverInterruptedUpdates();
         if (!exists(component))
@@ -580,15 +590,45 @@ public class UpdateManager
                     .orElseThrow(() -> new IOException("empty yt-cipher archive"));
         }
 
-        // Start from the current checkout so the pinned ejs/ and the offline deno-cache stay.
+        Path ejsZip = download(API + EJS_REPO + "/zipball/" + PINNED_EJS_COMMIT, work.resolve("ejs.zip"));
+        Path ejsExtracted = work.resolve("ejs");
+        UpdateSupport.extractZip(ejsZip, ejsExtracted);
+        Path ejsTop;
+        try (Stream<Path> children = Files.list(ejsExtracted))
+        {
+            ejsTop = children.filter(Files::isDirectory).findFirst()
+                    .orElseThrow(() -> new IOException("empty ejs archive"));
+        }
+
+        // Start from the current checkout so the offline deno-cache stays; ejs/ is replaced by the
+        // pinned commit, because yt-cipher's patch script is written against that exact source.
         Path current = cipherDir();
         Path staged = current.resolveSibling(current.getFileName() + ".new");
         UpdateSupport.deleteRecursively(staged);
         copyTree(current, staged);
         copyTree(top, staged);
+        stageEjs(ejsTop, staged.resolve("ejs"));
         Path server = staged.resolve("server.ts");
         Files.writeString(server, UpdateSupport.insertWatchdog(Files.readString(server, StandardCharsets.UTF_8)),
                 StandardCharsets.UTF_8);
+
+        Path patchScript = top.resolve("scripts").resolve("patch-ejs.ts");
+        if (!Files.isRegularFile(patchScript))
+        {
+            UpdateSupport.deleteRecursively(staged);
+            throw new IOException("the yt-cipher archive has no scripts/patch-ejs.ts");
+        }
+        ProcessBuilder patch = new ProcessBuilder(denoExe().toString(), "run", "--allow-read", "--allow-write",
+                patchScript.toString());
+        patch.directory(staged.toFile());
+        patch.environment().put("DENO_DIR", staged.resolve("deno-cache").toString());
+        ProcessOutput patched = runWithTimeout(patch, 5, TimeUnit.MINUTES);
+        if (patched == null || patched.exitCode() != 0)
+        {
+            UpdateSupport.deleteRecursively(staged);
+            throw new IOException("patching ejs failed: "
+                    + (patched == null ? "timed out" : tail(patched.output())));
+        }
 
         ProcessBuilder cache = new ProcessBuilder(denoExe().toString(), "cache", "--node-modules-dir=none",
                 "server.ts", "worker.ts");
@@ -639,7 +679,8 @@ public class UpdateManager
             JMusicBot.restartLocalCipherService(config);
             return "failed (the new version did not start, rolled back)";
         }
-        writeBuildInfoCommit(sha);
+        writeBuildInfo("yt-cipher.commit", sha);
+        writeBuildInfo("ejs.commit", PINNED_EJS_COMMIT);
         UpdateSupport.deleteRecursively(work);
         try
         {
@@ -855,13 +896,14 @@ public class UpdateManager
     /** Restores every component an interrupted update left without its file or folder. */
     private void recoverInterruptedUpdates()
     {
-        if (!isWindows())
-            return;
         try
         {
-            restoreIfMissing(ytDlpExe());
-            restoreIfMissing(ffmpegExe());
-            restoreIfMissing(denoExe());
+            if (isWindows())
+            {
+                restoreIfMissing(ytDlpExe());
+                restoreIfMissing(ffmpegExe());
+                restoreIfMissing(denoExe());
+            }
             restoreIfMissing(cipherDir());
             UpdateSupport.deleteRecursively(cipherDir().resolveSibling(cipherDir().getFileName() + ".new"));
         }
@@ -973,7 +1015,20 @@ public class UpdateManager
         }
     }
 
-    private static void writeBuildInfoCommit(String sha) throws IOException
+    /** Replaces the ejs checkout with the parts the package ships: its source, licence and configs. */
+    private static void stageEjs(Path source, Path target) throws IOException
+    {
+        UpdateSupport.deleteRecursively(target);
+        Files.createDirectories(target);
+        if (!Files.isDirectory(source.resolve("src")))
+            throw new IOException("the ejs archive has no src/");
+        copyTree(source.resolve("src"), target.resolve("src"));
+        for (String name : List.of("LICENSE", "README.md", "deno.json"))
+            if (Files.isRegularFile(source.resolve(name)))
+                Files.copy(source.resolve(name), target.resolve(name), StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static void writeBuildInfo(String key, String value) throws IOException
     {
         Path file = buildInfo();
         List<String> lines = Files.isRegularFile(file)
@@ -981,13 +1036,13 @@ public class UpdateManager
                 : new ArrayList<>();
         boolean replaced = false;
         for (int i = 0; i < lines.size(); i++)
-            if (lines.get(i).startsWith("yt-cipher.commit="))
+            if (lines.get(i).startsWith(key + "="))
             {
-                lines.set(i, "yt-cipher.commit=" + sha);
+                lines.set(i, key + "=" + value);
                 replaced = true;
             }
         if (!replaced)
-            lines.add("yt-cipher.commit=" + sha);
+            lines.add(key + "=" + value);
         Files.createDirectories(file.getParent());
         Files.write(file, lines, StandardCharsets.UTF_8);
     }
