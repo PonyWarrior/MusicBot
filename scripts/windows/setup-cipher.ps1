@@ -21,13 +21,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Both checkouts must keep LF endings: patch-ejs.ts matches multi-line LF blocks in ejs, and
+# Git for Windows defaults to core.autocrlf=true, which turns them into CRLF.
 Write-Host "==> Cloning yt-cipher $CipherCommit into $Directory"
 if (Test-Path (Join-Path $Directory ".git")) {
     Write-Host "    already present, fetching the pinned commit"
+    git -C $Directory config core.autocrlf false
     git -C $Directory fetch origin $CipherCommit
     if ($LASTEXITCODE -ne 0) { throw "git fetch of yt-cipher $CipherCommit failed." }
 } else {
-    git clone https://github.com/kikkia/yt-cipher.git $Directory
+    git clone -c core.autocrlf=false https://github.com/kikkia/yt-cipher.git $Directory
     if ($LASTEXITCODE -ne 0) { throw "git clone of yt-cipher failed." }
 }
 git -C $Directory checkout --detach $CipherCommit
@@ -36,10 +39,11 @@ if ($LASTEXITCODE -ne 0) { throw "git checkout of yt-cipher $CipherCommit failed
 Write-Host "==> Cloning the pinned ejs commit"
 $ejsDir = Join-Path $Directory "ejs"
 if (Test-Path (Join-Path $ejsDir ".git")) {
+    git -C $ejsDir config core.autocrlf false
     git -C $ejsDir fetch --depth 1 origin $EjsCommit
     if ($LASTEXITCODE -ne 0) { throw "git fetch of ejs $EjsCommit failed." }
 } else {
-    git clone https://github.com/yt-dlp/ejs.git $ejsDir
+    git clone -c core.autocrlf=false https://github.com/yt-dlp/ejs.git $ejsDir
     if ($LASTEXITCODE -ne 0) { throw "git clone of ejs failed." }
 }
 git -C $ejsDir checkout --detach $EjsCommit
