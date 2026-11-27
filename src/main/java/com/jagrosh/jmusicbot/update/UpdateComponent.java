@@ -16,7 +16,7 @@ package com.jagrosh.jmusicbot.update;
 import java.util.Locale;
 
 /**
- * The parts of the Windows package that can be updated on their own. The order is the order
+ * The parts of an install (the Windows package, or a Linux systemd service) that can be updated on their own. The order is the order
  * "update everything" applies them in: the bot goes last because it restarts the process.
  */
 public enum UpdateComponent

@@ -94,6 +94,34 @@ In PowerShell, quote each option that starts with `-D`
 | `-XX:+UseZGC` | Sub-millisecond GC pauses |
 | `-XX:+AlwaysPreTouch` | Pre-faults the heap, so playback does not stall on page faults |
 
+### As a Linux service (systemd)
+
+To let the owner `update` command update the bot itself, run it from a fixed jar name through
+`start.sh` (inside the jar as `update/start.sh`; the bot replaces it on every update):
+
+```bash
+cd ~/jmusicbot
+mv JMusicBot-<version>-All.jar JMusicBot.jar
+unzip -p JMusicBot.jar update/start.sh > start.sh && chmod +x start.sh
+```
+
+```ini
+# /etc/systemd/system/jmusicbot.service
+[Service]
+User=jmusicbot
+WorkingDirectory=/home/jmusicbot/jmusicbot
+Environment=JAVA_OPTS=-Dfile.encoding=UTF-8 -Dnogui=true --enable-native-access=ALL-UNNAMED -XX:+UseZGC -Xmx1024m
+ExecStart=/home/jmusicbot/jmusicbot/start.sh
+Restart=on-failure
+RestartSec=15
+```
+
+`update bot` downloads the release jar, checks its SHA-256, keeps the running jar as
+`JMusicBot.jar.old`, puts the new one in its place and exits with status 75, so systemd starts the
+new version. If that version does not connect to Discord within two starts, `start.sh` puts the old
+jar back. yt-dlp (`ytdlp/yt-dlp`) and Deno (`cipher/deno`) update the same way as on Windows;
+ffmpeg comes from the system package manager. No root access is needed.
+
 ### With the web GUI (Windows)
 
 The JavaFX jars are not inside the bot's jar. Copy them next to the checkout once, then start the

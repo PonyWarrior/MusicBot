@@ -305,6 +305,17 @@ public class Bot
      */
     public void shutdown()
     {
+        shutdown(0);
+    }
+
+    /**
+     * Shuts down like {@link #shutdown()}, ending the JVM with the given status. A non-zero status
+     * makes a service manager such as systemd start the bot again (used by the Linux self-update).
+     *
+     * @param exitCode the JVM exit status
+     */
+    public void shutdown(int exitCode)
+    {
         // The window, the restart button and the shutdown command can all get here at once.
         if (!shuttingDown.compareAndSet(false, true))
             return;
@@ -357,7 +368,7 @@ public class Bot
         finally
         {
             InstanceLock.release();
-            System.exit(0);
+            System.exit(exitCode);
         }
     }
 

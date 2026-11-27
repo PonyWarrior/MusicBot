@@ -255,8 +255,23 @@ public class UpdateManager
         Path dir = updateDirectory();
         try
         {
-            if (Files.isRegularFile(dir.resolve("pending")))
-                Files.writeString(dir.resolve("ok"), "ok");
+            Path pending = dir.resolve("pending");
+            if (Files.isRegularFile(pending))
+            {
+                if (isWindows())
+                {
+                    Files.writeString(dir.resolve("ok"), "ok");
+                }
+                else
+                {
+                    // No script waits on Linux: the new jar reached ready, so the update is done.
+                    // The previous jar stays as <jar>.old for a manual rollback.
+                    String version = Files.readString(pending, StandardCharsets.UTF_8).trim();
+                    LOG.info("Last bot update: updated to {}", version);
+                    for (String marker : List.of("pending", "attempts", "started", "ok"))
+                        Files.deleteIfExists(dir.resolve(marker));
+                }
+            }
             Path result = dir.resolve("result.txt");
             if (Files.isRegularFile(result))
             {
@@ -447,12 +462,12 @@ public class UpdateManager
 
     private Path ytDlpExe()
     {
-        return ytDlpDir().resolve("yt-dlp.exe");
+        return ytDlpDir().resolve(isWindows() ? "yt-dlp.exe" : "yt-dlp");
     }
 
     private Path ffmpegExe()
     {
-        return ytDlpDir().resolve("ffmpeg.exe");
+        return ytDlpDir().resolve(isWindows() ? "ffmpeg.exe" : "ffmpeg");
     }
 
     private Path cipherDir()
@@ -485,9 +500,12 @@ public class UpdateManager
 
     private String install(UpdateComponent component)
     {
-        // yt-cipher is plain source run by Deno, so it updates on any OS; the others are Windows builds.
-        if (!isWindows() && component != UpdateComponent.YTCIPHER)
-            return "automatic updates are only available in the Windows package";
+        // yt-cipher is plain source run by Deno, so it updates on any OS. yt-dlp, Deno and the bot
+        // have Windows and Linux builds; ffmpeg off Windows belongs to the system package manager.
+        if (!isWindows() && !isLinux() && component != UpdateComponent.YTCIPHER)
+            return "automatic updates are only available on Windows and Linux";
+        if (component == UpdateComponent.FFMPEG && !isWindows())
+            return "update ffmpeg with the system package manager";
         recoverInterruptedUpdates();
         if (!exists(component))
             return "not installed, skipped";
@@ -528,9 +546,13 @@ public class UpdateManager
     {
         if (YtDlpDownloader.isBusy())
             return "a download is running, try again later";
+        String assetName = assetName(UpdateComponent.YTDLP, "");
+        if (assetName == null)
+            return "no yt-dlp build for this system";
         JsonNode release = latestRelease("yt-dlp/yt-dlp");
-        JsonNode asset = asset(release, "yt-dlp.exe");
-        Path staged = downloadVerified(release, asset, "yt-dlp.exe");
+        JsonNode asset = asset(release, assetName);
+        Path staged = downloadVerified(release, asset, assetName);
+        makeExecutable(staged);
         if (!swapWhileIdle(staged, ytDlpExe(),
                 () -> UpdateSupport.parseYtDlpVersion(run(ytDlpExe(), "--version")) != null))
             return "a download is running, try again later";
@@ -543,7 +565,7 @@ public class UpdateManager
             return "a download is running, try again later";
         JsonNode release = latestRelease("GyanD/codexffmpeg");
         String tag = release.path("tag_name").asText();
-        JsonNode asset = asset(release, "ffmpeg-" + tag + "-essentials_build.zip");
+        JsonNode asset = asset(release, assetName(UpdateComponent.FFMPEG, tag));
         Path zip = downloadVerified(release, asset, "ffmpeg.zip");
         Path exe = extractOne(zip, "bin/ffmpeg.exe");
         if (!swapWhileIdle(exe, ffmpegExe(),
@@ -554,10 +576,14 @@ public class UpdateManager
 
     private String installDeno() throws Exception
     {
+        String assetName = assetName(UpdateComponent.DENO, "");
+        if (assetName == null)
+            return "no Deno build for this system";
         JsonNode release = latestRelease("denoland/deno");
-        JsonNode asset = asset(release, "deno-x86_64-pc-windows-msvc.zip");
+        JsonNode asset = asset(release, assetName);
         Path zip = downloadVerified(release, asset, "deno.zip");
-        Path exe = extractOne(zip, "deno.exe");
+        Path exe = extractOne(zip, isWindows() ? "deno.exe" : "/deno");
+        makeExecutable(exe);
 
         BotConfig config = bot.getConfig();
         boolean cipher = config.useLocalCipher();
@@ -693,8 +719,13 @@ public class UpdateManager
         return "updated to " + sha.substring(0, 7);
     }
 
+    /** Exit status of a Linux bot update; non-zero so systemd's Restart=on-failure starts the new jar. */
+    static final int UPDATE_EXIT_CODE = 75;
+
     private String installBot() throws Exception
     {
+        if (!isWindows())
+            return installBotLinux();
         Path launcher = WebServer.findLauncher();
         if (launcher == null)
             return "run-gui.bat or run.bat not found, update manually";
@@ -731,6 +762,84 @@ public class UpdateManager
         Thread shutdown = new Thread(bot::shutdown, "update-shutdown");
         shutdown.start();
         return "installing " + version + ", the bot restarts now";
+    }
+
+    /**
+     * The Linux bot update. A running jar can be replaced on Linux (the JVM keeps the old file
+     * open), so the new jar is swapped in place, the old one is kept as {@code <jar>.old}, and the
+     * bot exits non-zero for systemd to start it again. {@code start.sh} restores the old jar when
+     * the new one does not reach {@link #markReady()} after two starts.
+     */
+    private String installBotLinux() throws Exception
+    {
+        if (System.getenv("INVOCATION_ID") == null)
+            return "the bot is not running as a systemd service, update manually (see the README)";
+        Path current = runningJar();
+        if (current == null)
+            return "the bot is not running from a jar, update manually";
+        Path launcher = appDir().resolve("start.sh");
+        if (!Files.isRegularFile(launcher))
+            return "start.sh not found next to the jar, see the README for the service setup";
+
+        JsonNode release = botRelease();
+        String version = UpdateSupport.normalizeVersion(release.path("tag_name").asText());
+        String name = "JMusicBot-" + version + "-All.jar";
+        JsonNode asset = asset(release, name);
+
+        Path dir = updateDirectory();
+        Files.createDirectories(dir);
+        for (String marker : List.of("pending", "started", "ok", "attempts", "result.txt"))
+            Files.deleteIfExists(dir.resolve(marker));
+        Path jar = downloadVerified(release, asset, name);
+
+        // The launcher comes from the new jar too, so a fix to it ships with the release that needs it.
+        refreshLauncher(jar, launcher);
+
+        Path staged = current.resolveSibling(current.getFileName() + ".new");
+        Files.move(jar, staged, StandardCopyOption.REPLACE_EXISTING);
+        Path backup = current.resolveSibling(current.getFileName() + ".old");
+        Files.move(current, backup, StandardCopyOption.REPLACE_EXISTING);
+        try
+        {
+            Files.move(staged, current);
+        }
+        catch (IOException e)
+        {
+            Files.move(backup, current, StandardCopyOption.REPLACE_EXISTING);
+            throw e;
+        }
+        Files.writeString(dir.resolve("pending"), version);
+
+        LOG.info("Restarting into JMusicBot {}", version);
+        Thread shutdown = new Thread(() -> bot.shutdown(UPDATE_EXIT_CODE), "update-shutdown");
+        shutdown.start();
+        return "installing " + version + ", the bot restarts now";
+    }
+
+    private static final String LAUNCHER = "update/start.sh";
+
+    /** Replaces start.sh with the copy in the new jar, if it has one, keeping it executable. */
+    public static boolean refreshLauncher(Path newJar, Path launcher)
+    {
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(newJar.toFile()))
+        {
+            java.util.zip.ZipEntry entry = zip.getEntry(LAUNCHER);
+            if (entry == null)
+                return false;
+            Path temp = launcher.resolveSibling(launcher.getFileName() + ".new");
+            try (InputStream in = zip.getInputStream(entry))
+            {
+                Files.copy(in, temp, StandardCopyOption.REPLACE_EXISTING);
+            }
+            makeExecutable(temp);
+            Files.move(temp, launcher, StandardCopyOption.REPLACE_EXISTING);
+            return true;
+        }
+        catch (IOException e)
+        {
+            LOG.warn("Could not refresh start.sh from {}, keeping the current one: {}", newJar, e.getMessage());
+            return false;
+        }
     }
 
     private static final String UPDATE_SCRIPT = "update/apply-update.ps1";
@@ -898,7 +1007,7 @@ public class UpdateManager
     {
         try
         {
-            if (isWindows())
+            if (isWindows() || isLinux())
             {
                 restoreIfMissing(ytDlpExe());
                 restoreIfMissing(ffmpegExe());
@@ -1159,5 +1268,80 @@ public class UpdateManager
     private static boolean isWindows()
     {
         return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    private static boolean isLinux()
+    {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("linux");
+    }
+
+    /**
+     * The release asset that holds a component's binary for this OS and CPU, or null when the
+     * updater has no build for it (ffmpeg off Windows comes from the system package manager).
+     *
+     * @param component the component
+     * @param os the {@code os.name} property
+     * @param arch the {@code os.arch} property
+     * @param tag the release tag, used by ffmpeg's asset name
+     * @return the asset name, or null
+     */
+    public static String assetName(UpdateComponent component, String os, String arch, String tag)
+    {
+        String o = os.toLowerCase(Locale.ROOT);
+        String a = arch.toLowerCase(Locale.ROOT);
+        boolean windows = o.contains("win");
+        boolean linux = o.contains("linux");
+        boolean x64 = a.equals("amd64") || a.equals("x86_64");
+        boolean arm64 = a.equals("aarch64") || a.equals("arm64");
+        return switch (component)
+        {
+            case YTDLP -> windows && x64 ? "yt-dlp.exe"
+                    : linux && x64 ? "yt-dlp_linux"
+                    : linux && arm64 ? "yt-dlp_linux_aarch64" : null;
+            case FFMPEG -> windows && x64 ? "ffmpeg-" + tag + "-essentials_build.zip" : null;
+            case DENO -> windows && x64 ? "deno-x86_64-pc-windows-msvc.zip"
+                    : linux && x64 ? "deno-x86_64-unknown-linux-gnu.zip"
+                    : linux && arm64 ? "deno-aarch64-unknown-linux-gnu.zip" : null;
+            case YTCIPHER, BOT -> null;
+        };
+    }
+
+    private static String assetName(UpdateComponent component, String tag)
+    {
+        return assetName(component, System.getProperty("os.name", ""), System.getProperty("os.arch", ""), tag);
+    }
+
+    /** Marks a downloaded binary executable; Windows has no such bit. */
+    private static void makeExecutable(Path file) throws IOException
+    {
+        if (isWindows())
+            return;
+        try
+        {
+            java.util.Set<java.nio.file.attribute.PosixFilePermission> permissions =
+                    new java.util.HashSet<>(Files.getPosixFilePermissions(file));
+            permissions.add(java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE);
+            permissions.add(java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE);
+            permissions.add(java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE);
+            Files.setPosixFilePermissions(file, permissions);
+        }
+        catch (UnsupportedOperationException e)
+        {
+            throw new IOException("cannot mark " + file.getFileName() + " executable");
+        }
+    }
+
+    /** @return the jar this process runs from, or null when it runs from classes */
+    private static Path runningJar()
+    {
+        try
+        {
+            Path location = Path.of(JMusicBot.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+            return Files.isRegularFile(location) && location.toString().endsWith(".jar") ? location : null;
+        }
+        catch (Exception e)
+        {
+            return null;
+        }
     }
 }
